@@ -1,51 +1,75 @@
-# Project Plan – Mobility Credits & Dynamic Pricing in Fribourg (eqasim / MATSim)
+# Project Plan – Mobility Credits & Congestion Pricing, Fribourg (eqasim / MATSim)
 
 ## Goal
-Reduce car use (trips, km) and congestion in Fribourg, and shift demand to PT, bike and walk,
-using a daily **mobility-credit budget** plus **time-dependent credit prices**.
-Assess effectiveness *and* fairness (who loses, especially low PT accessibility / long commutes).
+Reduce car use (trips, km) and congestion, and shift demand to PT, bike and walk, using a
+daily mobility-credit budget with congestion-dependent credit prices. Then check who carries the burden.
 
-## Core design (decisions marked ⚙ are config parameters, defaults in brackets)
+## Model
 
-**Credit cost per trip**
+### Cost per trip
+`cost = base cost (CHF, existing model) + credits × scaling factor`
+
 | Mode | Credits |
 |------|---------|
-| Car  | mode constant + time-of-day bin factor × distance term ⚙ (linear; log as variant) |
-| PT   | mode constant × time-of-day bin factor ⚙ (factor 0 = free) |
-| Bike | mode constant ⚙ (0) – bike is teleported, no congestion to price |
+| Car  | mode constant + Σ over links on route of credit(link, time slot) + distance term (log for extra km) |
+| PT   | mode constant × time-of-day factor (far below car, above bike/walk) |
+| Bike | mode constant (optional: scaled with car congestion, low priority) |
 | Walk | 0 |
-| Car passenger | ⚙ (same as car / 0) – must be decided explicitly |
 
-- Time-of-day bins are derived from baseline congestion (link statistics). Dynamic (previous-iteration) congestion pricing comes later, with smoothing.
-- **Into utility:** the credit cost enters the existing monetary cost term as `λ · credits` (λ in CHF/credit ⚙).
-- **Budget:** each agent gets a daily balance B. Trips beyond the balance are allowed, but the missing credits are bought at price `p_buy` ⚙ (CHF/credit). No trip is ever "free" because the balance is exhausted.
-- **Plan-level evaluation:** the balance depends on all trips of the day, so budget logic runs per plan/tour, not per trip in isolation.
-- Optional variant: the heuristic penalty f(balance, remaining required trips) for sensitivity analysis; endogenous λ (market clearing) as an extension.
+**Congestion pricing on car links**
+- **Main version (B):** a fixed price per link and time slot, derived from baseline congestion (congested / free-flow travel time, grouped into a few levels).
+- **Optional extension (C):** dynamic prices, updated every iteration from the previous iteration's travel times, smoothed to avoid oscillation.
+- Route choice uses the same link prices as mode choice, through the existing `tolls` module (extended to depend on time).
 
-## Steps
+### Utility
+`U = U_base − f(credit cost, balance, future trips)`
 
-| # | Step | Output / what to expect |
-|---|------|-------------------------|
-| 0 | **Baseline** – run calibrated Fribourg scenario, extract peak bins from link stats | Reference mode shares, car-km, delay; time-of-day bin definition |
-| 1 | **Pricing-only reference** – credit prices converted to CHF, no budget | Isolates the effect of pricing alone (needed for comparison) |
-| 2 | **Credit cost model** (see brief below) | Per-trip credit cost for each mode, written to output; unit tests |
-| 3 | **Budget + equal distribution** – one B for everyone (e.g. "20 km car at mean time" *or* "6 PT trips" – pick one) | Car share ↓, peak delay ↓; check that the budget actually binds for a meaningful share of agents |
-| 4 | **Factor-based distribution** – B scaled by PT accessibility (OVGK class) and distance to work | Similar efficiency, lower burden for poorly served groups; watch the incentive to live far away |
-| 5 | **Sensitivity** – λ, p_buy, B, linear vs log, PT factor, f-heuristic | Robustness of conclusions |
-| 6 | **Analysis & report** | Mode shares, car trips/km, vehicle-hours of delay (peak), utility loss by income / OVGK / region, credit balance distribution, credits purchased |
+The exact shape of f is still open. It must fulfil:
+1. Trips the remaining balance can't cover are **not** free: they are either infeasible or the missing credits are bought (exact rule still open).
+2. Credits the agent still needs later in the day increase the penalty; needing few future credits gives a small penalty.
+3. The penalty scales with credit cost relative to the remaining balance.
+4. Heuristic for future need: the agent can still afford the car for its remaining trips → almost no penalty; only PT is still affordable → medium penalty; only bike/walk is left → high penalty.
 
-**Known limitations:** no departure-time choice (pricing shifts mode only, not timing); activity chains are fixed (activity loss is not modelled, so use utility loss instead); no PT crowding; freight/commercial traffic is outside mode choice (state that it is exempt).
+The agent's remaining trips are known from its plan. The balance depends on the modes chosen for all trips of the day, so f is evaluated at plan/tour level.
 
-## Brief for the coding agent – current step (Step 2: credit cost model)
+### Budget (equal distribution)
+`B = max( credits for 6 PT trips at mean time of day , credits for 20 km by car at mean time of day )`
+
+## Phases
+
+| Phase | Content | Expected outcome |
+|-------|---------|------------------|
+| **0. Baseline** | Run the calibrated Fribourg 10% scenario unchanged; derive the link × time-slot congestion levels | Reference values (mode shares, car km, delay); input for the link prices |
+| **1. Simple model** | Implement the cost functions above, credit tracking and a simple f; equal budget | Runs end to end; credit costs and balances visible in the output |
+| **2. Testing & tuning** | Tune the hyperparameters (mode constants, slot factors, log distance, scaling factor, f parameters, budget) | Fewer car trips and less car km, less peak delay, stable convergence; the budget binds for a meaningful share of agents |
+| **3. Extensions (optional)** | Dynamic pricing (C), departure-time choice, a more detailed f / cost model | Peak spreading (departure times); comparison of B vs C |
+| **4. Distribution by metrics** | Use the utility/cost model agreed in phases 2–3, kept unchanged; scale B by distance to main work location and PT availability (OVGK classes) | Similar effect, smaller burden for poorly served / long-commute groups |
+| **5. Analysis** | Compare baseline, pricing without budget, equal distribution and metric-based distribution | Mode shares, car km, vehicle-hours of delay, utility loss by group (income, OVGK, region), distribution of credit balances |
+
+**Limitations:** activity chains are fixed (so measure utility loss, not lost activities); no PT crowding; bike is teleported; freight/commercial traffic is outside mode choice (exempt); "dynamic" means "based on the previous iteration", not live congestion.
+
+## Running a scenario
+```bash
+mvn -Pstandalone -pl switzerland -am package -DskipTests        # in repo root
+mkdir -p ~/AbMT/runs/<name> && cd ~/AbMT/runs/<name>             # never run inside the scenario folder
+java -Xmx18g -cp <repo>/switzerland/target/switzerland-2.0.0.jar org.eqasim.switzerland.ch_cmdp.RunSimulation \
+  --config-path ~/AbMT/abmt-2026/A2.1/Fribourg_10pct/fribourg_config.xml \
+  --config:controller.outputDirectory ~/AbMT/runs/<name>/output --config:global.numberOfThreads 16
+```
+Keep the seed (518745) and the git commit fixed across compared runs.
+
+## Brief for the coding agent – current step (Phase 1: simple model)
 
 > We study a mobility-credit scheme for Fribourg in the eqasim Swiss model (`switzerland/.../ch_cmdp`).
-> **Task:** add a configurable credit cost per trip and feed it into mode choice, without changing baseline behaviour when disabled.
+> Read `Project_Plan.md` (sections "Model" and "Budget") first.
+> **Task:** implement the credit cost and a first, simple credit utility term. Everything must be switchable via config, and with the scheme disabled, results must be identical to the baseline.
 >
-> 1. New config group `mobilityCredits` (enabled=false by default): per-mode constants, time-of-day bins (start/end hour → factor), car distance function (`linear|log`), `lambda_CHF_per_credit`, `buyPrice_CHF_per_credit`, `dailyBudget`.
-> 2. A `CreditCostModel` (car, pt, bike, walk, car_passenger) returning credits per trip from mode, departure time and distance. Look at the existing cost models in `mode_choice/costs/` and `SwissCostParameters`.
-> 3. Add `λ · credits` to the monetary cost term of the Swiss utility estimators (e.g. `SwissCarDetailedUtilityEstimator.estimateMonetaryCostUtility`), or use the core policy hook `core/.../policies/utility/UtilityPenalty`. Pick whichever is cleaner and explain why.
-> 4. Budget: track credits used across the agent's plan (tour/plan level; check which DMC model type the Swiss config uses). Credits beyond the budget cost `buyPrice` instead of λ. Constraints are registered in `SwissModeChoiceModule`.
-> 5. Output: per-trip credits and per-person balance/purchases (CSV per iteration).
-> 6. Unit tests for the cost model and budget logic; disabled config ⇒ identical results to baseline.
+> 1. **Config group** `mobilityCredits`: enabled, mode constants, PT time-slot factors, car distance term (log), scaling factor (credits → utility), budget rule inputs (6 PT trips / 20 km car), path to link-price file, f parameters.
+> 2. **Link prices (B):** a tool that computes credit(link, time slot) from baseline output (congested / free-flow time, binned into levels) and writes a file; it is loaded at startup.
+> 3. **Credit cost model:** car = constant + sum of link prices along the routed path at estimated link entry times + log distance term; PT = constant × slot factor; bike = constant; walk = 0. Existing costs live in `mode_choice/costs/` and `SwissCostParameters`.
+> 4. **Routing:** extend `tolls/` so car link disutility includes the time-dependent credit price (same prices as in 3).
+> 5. **Utility:** add `− f(...)` at plan/tour level using the agent's remaining balance and remaining trips; start with a simple f that satisfies the four properties in the plan. Possible hooks: estimators' `estimateMonetaryCostUtility`, `core/.../policies/utility/UtilityPenalty`, constraints registered in `SwissModeChoiceModule`. The DMC model type is `Tour`.
+> 6. **Output:** per trip: credits; per person: budget, credits used, credits beyond the balance. One CSV per iteration.
+> 7. **Unit tests** for the cost model, link prices, budget and f; plus a regression test that the disabled scheme gives the same results as the baseline.
 >
-> Do not touch calibration code or existing cost parameters. Keep everything switchable via config.
+> Do not modify calibration code or existing calibrated parameters.
