@@ -15,27 +15,17 @@ import org.matsim.api.core.v01.network.Link;
 import org.matsim.core.utils.io.IOUtils;
 
 /**
- * Baseline congestion per link and time bin, used for the fixed congestion pricing (option B).
+ * Baseline congestion per link and time bin, used for fixed congestion
+ * pricing (option B).
  * <p>
- * Input file format (CSV, optionally gzipped, comma or semicolon separated, values may be quoted, column
- * order free, extra columns ignored):
- *
- * <pre>
- * link_id,time_bin_start_s,time_bin_end_s,congestion_ratio_per_link
- * "12345",25200,28800,1.63
- * </pre>
- *
- * {@code congestion_ratio_per_link} is congested / free-flow travel time of the link in that bin. Bins of
- * one link must not overlap. Links or times without an entry are treated as uncongested (ratio 1.0).
- * Times are not wrapped around midnight.
+ * Supports CSV files with either seconds (`time_bin_start_s`) or hours
+ * (`bin_start_hour`),
+ * and TTI or congestion ratio columns (`tti`, `congestion_ratio_per_link`).
  */
 public class LinkCongestionTable {
 	public static final double UNCONGESTED = 1.0;
 
 	static final String LINK_ID = "link_id";
-	static final String START_TIME = "time_bin_start_s";
-	static final String END_TIME = "time_bin_end_s";
-	static final String CONGESTION_RATIO = "congestion_ratio_per_link";
 
 	private final Map<Id<Link>, Bins> bins;
 
@@ -43,7 +33,10 @@ public class LinkCongestionTable {
 		this.bins = bins;
 	}
 
-	/** Returns the congestion ratio of the link at the given time, or 1.0 if there is no entry. */
+	/**
+	 * Returns the congestion ratio of the link at the given time, or 1.0 if there
+	 * is no entry.
+	 */
 	public double getCongestionRatio(Id<Link> linkId, double time_s) {
 		Bins linkBins = bins.get(linkId);
 		return linkBins == null ? UNCONGESTED : linkBins.get(time_s);
@@ -68,13 +61,45 @@ public class LinkCongestionTable {
 			}
 
 			String delimiter = header.contains(";") ? ";" : ",";
-			List<String> columns = Arrays.stream(header.split(delimiter, -1)).map(LinkCongestionTable::unquote)
+			List<String> columns = Arrays.stream(header.split(delimiter, -1))
+					.map(LinkCongestionTable::unquote)
 					.toList();
 
 			int linkIndex = requireColumn(columns, LINK_ID, path);
-			int startIndex = requireColumn(columns, START_TIME, path);
-			int endIndex = requireColumn(columns, END_TIME, path);
-			int ratioIndex = requireColumn(columns, CONGESTION_RATIO, path);
+
+			// Determine start time column & whether it is in hours or seconds
+			int startIndex = -1;
+			boolean isStartInHours = false;
+			if (columns.contains("time_bin_start_s")) {
+				startIndex = columns.indexOf("time_bin_start_s");
+			} else if (columns.contains("bin_start_hour")) {
+				startIndex = columns.indexOf("bin_start_hour");
+				isStartInHours = true;
+			} else {
+				throw new IllegalStateException(
+						"Missing start time column ('time_bin_start_s' or 'bin_start_hour') in " + path);
+			}
+
+			// Determine end time column if available
+			int endIndex = -1;
+			boolean isEndInHours = false;
+			if (columns.contains("time_bin_end_s")) {
+				endIndex = columns.indexOf("time_bin_end_s");
+			} else if (columns.contains("bin_end_hour")) {
+				endIndex = columns.indexOf("bin_end_hour");
+				isEndInHours = true;
+			}
+
+			// Determine ratio/TTI column
+			int ratioIndex = -1;
+			if (columns.contains("tti")) {
+				ratioIndex = columns.indexOf("tti");
+			} else if (columns.contains("congestion_ratio_per_link")) {
+				ratioIndex = columns.indexOf("congestion_ratio_per_link");
+			} else {
+				throw new IllegalStateException(
+						"Missing TTI / congestion ratio column ('tti' or 'congestion_ratio_per_link') in " + path);
+			}
 
 			String line;
 			int lineNumber = 1;
@@ -95,10 +120,21 @@ public class LinkCongestionTable {
 				}
 
 				try {
-					builder.add(Id.createLinkId(unquote(values[linkIndex])), //
-							Double.parseDouble(unquote(values[startIndex])), //
-							Double.parseDouble(unquote(values[endIndex])), //
-							Double.parseDouble(unquote(values[ratioIndex])));
+					double rawStart = Double.parseDouble(unquote(values[startIndex]));
+					double start_s = isStartInHours ? rawStart * 3600.0 : rawStart;
+
+					double end_s;
+					if (endIndex >= 0) {
+						double rawEnd = Double.parseDouble(unquote(values[endIndex]));
+						end_s = isEndInHours ? rawEnd * 3600.0 : rawEnd;
+					} else {
+						// Default 15-minute bin duration (900 seconds) if end time column is absent
+						end_s = start_s + 900.0;
+					}
+
+					double congestionRatio = Double.parseDouble(unquote(values[ratioIndex]));
+
+					builder.add(Id.createLinkId(unquote(values[linkIndex])), start_s, end_s, congestionRatio);
 				} catch (RuntimeException e) {
 					throw new IllegalStateException(
 							String.format("Invalid line %d of %s: %s", lineNumber, path, e.getMessage()), e);

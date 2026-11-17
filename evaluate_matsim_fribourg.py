@@ -21,7 +21,6 @@ python evaluate_matsim_fribourg.py \
   --out_dir ./evaluation_comparison \
   --sample_factor 10.0
 """
-
 import os
 import gzip
 import argparse
@@ -104,11 +103,8 @@ def load_persons_and_trips(sim_dir):
             persons.rename(columns={"person": "person_id"}, inplace=True)
 
     # STRICT RESIDENT FILTERING:
-    # As specified in Validation_08.pdf, population and trip validation metrics 
-    # must only consider residents inside the scenario boundary (excluding external/freight).
     resident_person_ids = set()
     if persons is not None:
-        # Check for boundary/resident flags if present, otherwise all persons in persons table are residents
         if "in_boundary" in persons.columns:
             res_df = persons[persons["in_boundary"].astype(str).str.lower().isin(["true", "1", "yes"])]
             resident_person_ids = set(res_df["person_id"])
@@ -118,7 +114,6 @@ def load_persons_and_trips(sim_dir):
         else:
             resident_person_ids = set(persons["person_id"])
 
-        # Filter trips to only include resident persons if person_id is present
         if "person_id" in trips.columns and resident_person_ids:
             trips = trips[trips["person_id"].isin(resident_person_ids)].copy()
 
@@ -233,11 +228,11 @@ def parse_network_xml(network_path):
                 elem.clear()
     return pd.DataFrame.from_dict(links, orient="index")
 
-def extract_link_congestion_from_events(events_path, network_df, sample_factor=10.0, bin_size_s=3600):
+def extract_link_congestion_from_events(events_path, network_df, sample_factor=10.0, bin_size_s=900):
     """
     Parses output_events.xml(.gz) including ALL vehicles (residents, through-traffic, 
     and freight) to calculate the primary road congestion metric: 
-    Travel Time Index (TTI).
+    Travel Time Index (TTI) in 15-minute bins (default bin_size_s = 900s).
     """
     open_fn = gzip.open if events_path.endswith(".gz") else open
     valid_links = set(network_df["link_id"].unique())
@@ -264,7 +259,8 @@ def extract_link_congestion_from_events(events_path, network_df, sample_factor=1
                         if t_enter is not None:
                             trav_time = max(t_leave - t_enter, 0.0)
                             time_bin = int(t_enter // bin_size_s)
-                            if 0 <= time_bin < 24:
+                            max_bins = int(24 * 3600 // bin_size_s)
+                            if 0 <= time_bin < max_bins:
                                 rec = stats[(lid, time_bin)]
                                 rec[0] += 1
                                 rec[1] += trav_time
@@ -277,7 +273,7 @@ def extract_link_congestion_from_events(events_path, network_df, sample_factor=1
     rows = []
     net_lookup = network_df.set_index("link_id").to_dict(orient="index")
 
-    for (lid, hour), (sim_count, sum_tt) in stats.items():
+    for (lid, time_bin), (sim_count, sum_tt) in stats.items():
         net_info = net_lookup[lid]
         free_tt = net_info["free_time_s"]
         length_m = net_info["length_m"]
@@ -285,17 +281,20 @@ def extract_link_congestion_from_events(events_path, network_df, sample_factor=1
 
         avg_tt = max(sum_tt / sim_count, free_tt) if sim_count > 0 else free_tt
         delay_per_veh_s = max(0.0, avg_tt - free_tt)
+        # Scale volume for 15-minute bin (capacity and volume scaled appropriately)
         scaled_volume = sim_count * sample_factor
         total_delay_veh_hours = (delay_per_veh_s * scaled_volume) / 3600.0
 
         # PRIMARY CONGESTION METRIC: Travel Time Index (TTI)
         tti = avg_tt / free_tt if free_tt > 0 else 1.0
+        bin_hour = time_bin * (bin_size_s / 3600.0)
 
         rows.append({
             "link_id": lid,
-            "hour": hour,
+            "time_bin_15min": time_bin,
+            "bin_start_hour": round(bin_hour, 2),
             "sim_vehicles": sim_count,
-            "scaled_volume_vh": scaled_volume,
+            "scaled_volume_15min": scaled_volume,
             "capacity_vh": cap_vh,
             "length_m": length_m,
             "free_travel_time_s": round(free_tt, 3),
@@ -305,29 +304,30 @@ def extract_link_congestion_from_events(events_path, network_df, sample_factor=1
             "tti": round(tti, 4)
         })
 
-    hourly_df = pd.DataFrame(rows)
-    if hourly_df.empty:
-        return hourly_df, pd.DataFrame()
+    bin_df = pd.DataFrame(rows)
+    if bin_df.empty:
+        return bin_df, pd.DataFrame()
 
-    daily_agg = hourly_df.groupby("link_id").apply(
+    daily_agg = bin_df.groupby("link_id").apply(
         lambda g: pd.Series({
             "length_m": g["length_m"].iloc[0],
             "capacity_vh": g["capacity_vh"].iloc[0],
             "free_travel_time_s": g["free_travel_time_s"].iloc[0],
-            "daily_scaled_volume": g["scaled_volume_vh"].sum(),
+            "daily_scaled_volume": g["scaled_volume_15min"].sum(),
             "daily_total_delay_veh_h": g["total_delay_veh_h"].sum(),
-            "weighted_avg_tti": np.average(g["tti"], weights=g["scaled_volume_vh"]) if g["scaled_volume_vh"].sum() > 0 else 1.0,
-            "max_hourly_tti": g["tti"].max(),
-            "peak_congested_hour": g.loc[g["tti"].idxmax(), "hour"]
+            "weighted_avg_tti": np.average(g["tti"], weights=g["scaled_volume_15min"]) if g["scaled_volume_15min"].sum() > 0 else 1.0,
+            "max_15min_tti": g["tti"].max(),
+            "peak_congested_bin": g.loc[g["tti"].idxmax(), "time_bin_15min"],
+            "peak_congested_hour": g.loc[g["tti"].idxmax(), "bin_start_hour"]
         })
     ).reset_index()
 
-    return hourly_df, daily_agg
+    return bin_df, daily_agg
 
 # ==============================================================================
 # 4. METRIC EXTRACTION & CSV EXPORT
 # ==============================================================================
-def compute_and_export_metrics(persons, trips, hourly_cong, daily_cong, out_dir, sample_factor=10.0):
+def compute_and_export_metrics(persons, trips, bin_cong, daily_cong, out_dir, sample_factor=10.0):
     os.makedirs(out_dir, exist_ok=True)
     metrics_dict = {}
 
@@ -407,8 +407,8 @@ def compute_and_export_metrics(persons, trips, hourly_cong, daily_cong, out_dir,
                 metrics_dict["fairness"] = fairness_df
                 break
 
-    if not hourly_cong.empty:
-        hourly_cong.to_csv(os.path.join(out_dir, "link_congestion_hourly.csv"), index=False)
+    if not bin_cong.empty:
+        bin_cong.to_csv(os.path.join(out_dir, "link_congestion_15min_bins.csv"), index=False)
         daily_cong.to_csv(os.path.join(out_dir, "link_congestion_daily_summary.csv"), index=False)
 
     return metrics_dict
@@ -523,38 +523,40 @@ def plot_spatial_car_share_heatmap(trips, out_path, patch_size_m=2000):
     fig.savefig(out_path)
     plt.close(fig)
 
-def plot_hourly_network_congestion(hourly_cong_base, hourly_cong_comp, out_path, label_base="Baseline", label_comp="Policy"):
-    if hourly_cong_base.empty: return
-    def agg_hour(df):
-        hours = pd.Index(range(24), name="hour")
-        grp = df.groupby("hour").apply(
+def plot_15min_network_congestion(bin_cong_base, bin_cong_comp, out_path, label_base="Baseline", label_comp="Policy"):
+    if bin_cong_base.empty: return
+    def agg_15min(df):
+        bins = pd.Index(range(96), name="time_bin_15min")
+        grp = df.groupby("time_bin_15min").apply(
             lambda g: pd.Series({
                 "delay_vh": g["total_delay_veh_h"].sum(),
-                "mean_tti": np.average(g["tti"], weights=g["scaled_volume_vh"]) if g["scaled_volume_vh"].sum() > 0 else 1.0
+                "mean_tti": np.average(g["tti"], weights=g["scaled_volume_15min"]) if g["scaled_volume_15min"].sum() > 0 else 1.0
             })
-        ).reindex(hours, fill_value=0.0)
+        ).reindex(bins, fill_value=0.0)
         grp.loc[grp["mean_tti"] == 0, "mean_tti"] = 1.0
-        return grp.reset_index()
+        res = grp.reset_index()
+        res["hour"] = res["time_bin_15min"] * 0.25
+        return res
 
-    b_agg = agg_hour(hourly_cong_base)
-    c_agg = agg_hour(hourly_cong_comp) if hourly_cong_comp is not None and not hourly_cong_comp.empty else None
+    b_agg = agg_15min(bin_cong_base)
+    c_agg = agg_15min(bin_cong_comp) if bin_cong_comp is not None and not bin_cong_comp.empty else None
 
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.2))
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.2))
     ax1 = axes[0]
-    ax1.plot(b_agg["hour"], b_agg["delay_vh"], label=label_base, color=COLOR_BASELINE if c_agg is not None else COLOR_POLICY, linewidth=2.0)
+    ax1.plot(b_agg["hour"], b_agg["delay_vh"], label=label_base, color=COLOR_BASELINE if c_agg is not None else COLOR_POLICY, linewidth=1.5)
     if c_agg is not None:
-        ax1.plot(c_agg["hour"], c_agg["delay_vh"], label=label_comp, color=COLOR_POLICY, linewidth=2.0)
-    ax1.set_title("Network Congestion Delay by Hour (All Vehicles)")
+        ax1.plot(c_agg["hour"], c_agg["delay_vh"], label=label_comp, color=COLOR_POLICY, linewidth=1.5)
+    ax1.set_title("Network Congestion Delay by 15-min Bin")
     ax1.set_xlabel("Hour of Day")
     ax1.set_ylabel("Total Delay [Vehicle-Hours]")
     ax1.legend(loc="upper left")
     despine(ax1)
 
     ax2 = axes[1]
-    ax2.plot(b_agg["hour"], b_agg["mean_tti"], label=label_base, color=COLOR_BASELINE if c_agg is not None else COLOR_POLICY, linewidth=2.0)
+    ax2.plot(b_agg["hour"], b_agg["mean_tti"], label=label_base, color=COLOR_BASELINE if c_agg is not None else COLOR_POLICY, linewidth=1.5)
     if c_agg is not None:
-        ax2.plot(c_agg["hour"], c_agg["mean_tti"], label=label_comp, color=COLOR_POLICY, linewidth=2.0)
-    ax2.set_title("Volume-Weighted Travel Time Index (TTI)")
+        ax2.plot(c_agg["hour"], c_agg["mean_tti"], label=label_comp, color=COLOR_POLICY, linewidth=1.5)
+    ax2.set_title("Volume-Weighted TTI (15-min Bins)")
     ax2.set_xlabel("Hour of Day")
     ax2.set_ylabel("Travel Time Index (t_actual / t_free)")
     despine(ax2)
@@ -567,7 +569,7 @@ def plot_hourly_network_congestion(hourly_cong_base, hourly_cong_comp, out_path,
 # 6. MAIN CLI ENTRYPOINT
 # ==============================================================================
 def main():
-    parser = argparse.ArgumentParser(description="Extract MATSim/eqasim metrics (residents only) & congestion (everyone).")
+    parser = argparse.ArgumentParser(description="Extract MATSim/eqasim metrics (residents only) & congestion in 15-min bins (everyone).")
     parser.add_argument("--sim_dir", required=True, help="Path to baseline MATSim simulation output folder.")
     parser.add_argument("--compare_dir", default=None, help="Optional path to policy implementation output folder.")
     parser.add_argument("--label_base", default="Baseline", help="Legend label for baseline.")
@@ -583,23 +585,23 @@ def main():
     net_file = find_file(args.sim_dir, ["output_network.xml.gz", "output_network.xml"])
     events_file = find_file(args.sim_dir, ["output_events.xml.gz", "output_events.xml"])
 
-    hourly_cong_base, daily_cong_base = pd.DataFrame(), pd.DataFrame()
+    bin_cong_base, daily_cong_base = pd.DataFrame(), pd.DataFrame()
     if net_file and events_file:
-        print(f"[2/4] Extracting link congestion (INCLUDES EVERYONE: residents, freight, cross-border)...")
+        print(f"[2/4] Extracting link congestion in 15-min bins (INCLUDES EVERYONE: residents, freight, cross-border)...")
         net_df = parse_network_xml(net_file)
-        hourly_cong_base, daily_cong_base = extract_link_congestion_from_events(
-            events_file, net_df, sample_factor=args.sample_factor
+        bin_cong_base, daily_cong_base = extract_link_congestion_from_events(
+            events_file, net_df, sample_factor=args.sample_factor, bin_size_s=900
         )
 
     print(f"[3/4] Exporting metrics CSVs...")
     metrics_base = compute_and_export_metrics(
-        persons_base, trips_base, hourly_cong_base, daily_cong_base,
+        persons_base, trips_base, bin_cong_base, daily_cong_base,
         out_dir=os.path.join(args.out_dir, "csv_baseline"),
         sample_factor=args.sample_factor
     )
 
     metrics_comp = {}
-    hourly_cong_comp = pd.DataFrame()
+    bin_cong_comp = pd.DataFrame()
     if args.compare_dir:
         print(f"[3b/4] Loading comparison scenario...")
         persons_comp, trips_comp = load_persons_and_trips(args.compare_dir)
@@ -608,11 +610,11 @@ def main():
         daily_cong_comp = pd.DataFrame()
         if net_c and ev_c:
             net_df_c = parse_network_xml(net_c)
-            hourly_cong_comp, daily_cong_comp = extract_link_congestion_from_events(
-                ev_c, net_df_c, sample_factor=args.sample_factor
+            bin_cong_comp, daily_cong_comp = extract_link_congestion_from_events(
+                ev_c, net_df_c, sample_factor=args.sample_factor, bin_size_s=900
             )
         metrics_comp = compute_and_export_metrics(
-            persons_comp, trips_comp, hourly_cong_comp, daily_cong_comp,
+            persons_comp, trips_comp, bin_cong_comp, daily_cong_comp,
             out_dir=os.path.join(args.out_dir, "csv_policy"),
             sample_factor=args.sample_factor
         )
@@ -674,14 +676,14 @@ def main():
         out_path=os.path.join(plots_dir, "07_spatial_car_share_2x2km_baseline.png")
     )
 
-    if not hourly_cong_base.empty:
-        plot_hourly_network_congestion(
-            hourly_cong_base, hourly_cong_comp if not hourly_cong_comp.empty else None,
-            out_path=os.path.join(plots_dir, "08_network_congestion_hourly.png"),
+    if not bin_cong_base.empty:
+        plot_15min_network_congestion(
+            bin_cong_base, bin_cong_comp if not bin_cong_comp.empty else None,
+            out_path=os.path.join(plots_dir, "08_network_congestion_15min.png"),
             label_base=args.label_base, label_comp=args.label_comp
         )
 
-    print("Evaluation complete successfully!")
+    print("Evaluation complete successfully with 15-minute congestion bins!")
 
 if __name__ == "__main__":
     main()

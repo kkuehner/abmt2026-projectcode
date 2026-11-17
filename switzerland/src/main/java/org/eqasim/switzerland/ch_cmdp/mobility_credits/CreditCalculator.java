@@ -15,22 +15,30 @@ import org.matsim.core.population.routes.NetworkRoute;
 import org.matsim.core.router.util.TravelTime;
 
 /**
- * Computes the mobility credits a trip costs (see Project_Plan.md, "Cost per trip").
+ * Computes the mobility credits a trip costs (see Project_Plan.md, "Cost per
+ * trip").
  *
  * <ul>
- * <li>car: constant + distanceFactor * ln(1 + km) + congestion price of every link the car enters. The price is
- * (credits/km of the link's congestion level) * link length, with the level taken from the baseline congestion
- * ratio at the time the car enters the link (from the given car travel times).</li>
- * <li>car_passenger: the car formula on the passenger's route, divided by the occupancy</li>
- * <li>pt: constant, times the peak factor if the trip departs in a peak window</li>
+ * <li>car: constant + distanceFactor * ln(1 + km) + congestion price of every
+ * link the car enters. The price is
+ * (credits/km of the link's congestion level) * link length, with the level
+ * taken from the baseline congestion
+ * ratio at the time the car enters the link (from the given car travel
+ * times).</li>
+ * <li>car_passenger: the car formula on the passenger's route, divided by the
+ * occupancy</li>
+ * <li>pt: constant, times the peak factor if the trip departs in a peak
+ * window</li>
  * <li>bike: constant</li>
  * <li>walk and all other modes (truck, outside, remote_walk, ...): 0</li>
  * </ul>
  *
- * "_loop" variants (e.g. car_loop) are priced like their base mode. Only legs of the trip's own mode
+ * "_loop" variants (e.g. car_loop) are priced like their base mode. Only legs
+ * of the trip's own mode
  * count towards distance and congestion; access/egress walks are free.
  * <p>
- * Whether a person takes part in the scheme is not decided here; this class only prices trips.
+ * Whether a person takes part in the scheme is not decided here; this class
+ * only prices trips.
  * It is stateless after construction and safe to use from several threads.
  */
 public class CreditCalculator {
@@ -59,26 +67,28 @@ public class CreditCalculator {
 
 	/**
 	 * @param mode          the trip's main mode
-	 * @param departureTime departure time of the trip, used where legs carry no departure time
+	 * @param departureTime departure time of the trip, used where legs carry no
+	 *                      departure time
 	 * @param elements      the routed legs and interaction activities of the trip
 	 */
 	public double calculateCredits(String mode, double departureTime, List<? extends PlanElement> elements) {
 		switch (baseMode(mode)) {
-		case TransportMode.car:
-			return calculateCarCredits(mode, departureTime, elements);
-		case CAR_PASSENGER:
-			return calculateCarCredits(mode, departureTime, elements) / parameters.carPassenger.occupancy;
-		case TransportMode.pt:
-			return calculatePtCredits(firstDepartureTime(departureTime, elements));
-		case TransportMode.bike:
-			return parameters.bike.constant_credits;
-		default:
-			return 0.0;
+			case TransportMode.car:
+				return calculateCarCredits(mode, departureTime, elements);
+			case CAR_PASSENGER:
+				return calculateCarCredits(mode, departureTime, elements) / parameters.carPassenger.occupancy;
+			case TransportMode.pt:
+				return calculatePtCredits(firstDepartureTime(departureTime, elements));
+			case TransportMode.bike:
+				return parameters.bike.constant_credits;
+			default:
+				return 0.0;
 		}
 	}
 
 	/**
-	 * Congestion credits for entering the link at the given time. Also meant for car routing, so that route
+	 * Congestion credits for entering the link at the given time. Also meant for
+	 * car routing, so that route
 	 * choice and mode choice use the same prices.
 	 */
 	public double getLinkCredits(Link link, double enterTime) {
@@ -143,12 +153,14 @@ public class CreditCalculator {
 		}
 
 		var car = parameters.car;
+
 		return car.constant_credits + car.distanceFactor_credits * Math.log1p(distance_m / 1000.0)
 				+ congestionCredits;
 	}
 
 	/**
-	 * Links a vehicle enters on this route: all route links plus the end link. The start link is not entered,
+	 * Links a vehicle enters on this route: all route links plus the end link. The
+	 * start link is not entered,
 	 * because a departing vehicle starts at its end.
 	 */
 	private List<Link> enteredLinks(NetworkRoute route) {

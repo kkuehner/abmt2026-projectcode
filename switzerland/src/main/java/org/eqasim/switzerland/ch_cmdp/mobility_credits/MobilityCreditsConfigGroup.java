@@ -6,17 +6,20 @@ import org.matsim.core.config.Config;
 import org.matsim.core.config.ReflectiveConfigGroup;
 
 /**
- * Structural settings of the mobility-credit scheme. Tunable numbers live in {@link MobilityCreditsParameters}.
+ * Structural settings of the mobility-credit scheme. Tunable numbers live in
+ * {@link MobilityCreditsParameters}.
  * <p>
- * The group is always present in the config with {@code enabled = false}, so a run without changes is identical
- * to the baseline. Enable from the command line with {@code --config:mobilityCredits.enabled true}.
+ * The group is always present in the config with {@code enabled = false}, so a
+ * run without changes is identical
+ * to the baseline. Enable from the command line with
+ * {@code --config:mobilityCredits.enabled true}.
  */
 public final class MobilityCreditsConfigGroup extends ReflectiveConfigGroup {
 	public static final String GROUP_NAME = "mobilityCredits";
 
 	private boolean enabled = false;
-	private String parametersPath = null;
-	private String congestionPath = null;
+	private String parametersPath = "switzerland/src/main/java/org/eqasim/switzerland/ch_cmdp/mobility_credits/MobilityCreditsParameters.java";
+	private String congestionPath = "evaluation_results/csv_baseline/link_congestion_15min_bins.csv";
 	private String residentAttribute = "cantonName";
 	private String residentValue = "fribourg";
 

@@ -3,13 +3,17 @@ package org.eqasim.switzerland.ch_cmdp.mobility_credits;
 import org.eqasim.core.simulation.mode_choice.ParameterDefinition;
 
 /**
- * Hyperparameters of the mobility-credit cost model (see Project_Plan.md, "Cost per trip").
+ * Hyperparameters of the mobility-credit cost model (see Project_Plan.md, "Cost
+ * per trip").
  * <p>
- * Like the existing cost parameters, values can be overridden from a flat yml file
+ * Like the existing cost parameters, values can be overridden from a flat yml
+ * file
  * ({@code car.constant_credits: 1.5}) or the command line
- * ({@code --credit-parameter:car.constant_credits 1.5}) via {@link ParameterDefinition}.
+ * ({@code --credit-parameter:car.constant_credits 1.5}) via
+ * {@link ParameterDefinition}.
  * <p>
- * The defaults are placeholders that only fix the ordering car &gt; PT &gt; bike &gt; walk; they are
+ * The defaults are placeholders that only fix the ordering car &gt; PT &gt;
+ * bike &gt; walk; they are
  * meant to be tuned in Phase 2.
  */
 public class MobilityCreditsParameters implements ParameterDefinition {
@@ -19,14 +23,17 @@ public class MobilityCreditsParameters implements ParameterDefinition {
 		public double constant_credits = 1.0;
 		/** Distance term: {@code distanceFactor_credits * ln(1 + distance_km)}. */
 		public double distanceFactor_credits = 2.0;
-		/** Congestion ratio (congested / free-flow travel time) from which a link counts as medium congested. */
+		/**
+		 * Congestion ratio (congested / free-flow travel time) from which a link counts
+		 * as medium congested.
+		 */
 		public double congestionThresholdMedium = 1.2;
 		/** Congestion ratio from which a link counts as highly congested. */
-		public double congestionThresholdHigh = 1.5;
+		public double congestionThresholdHigh = 1.0;
 		/** Credits per km driven on a medium-congested link. */
-		public double mediumCongestion_credits_km = 0.5;
+		public double mediumCongestion_credits_km = 1.5;
 		/** Credits per km driven on a highly congested link. */
-		public double highCongestion_credits_km = 1.0;
+		public double highCongestion_credits_km = 2.0;
 	}
 
 	public static class PtParameters {
@@ -46,12 +53,16 @@ public class MobilityCreditsParameters implements ParameterDefinition {
 	}
 
 	public static class CarPassengerParameters {
-		/** Car passengers pay the car credits of the same trip divided by this occupancy. */
+		/**
+		 * Car passengers pay the car credits of the same trip divided by this
+		 * occupancy.
+		 */
 		public double occupancy = 2.0;
 	}
 
 	/**
-	 * Value of one credit in CHF. The credit term of the utility is betaCost_u_MU * creditValue_CHF * credits,
+	 * Value of one credit in CHF. The credit term of the utility is betaCost_u_MU *
+	 * creditValue_CHF * credits,
 	 * without the income interaction of the base cost term.
 	 */
 	public double creditValue_CHF = 1.0;
@@ -91,7 +102,8 @@ public class MobilityCreditsParameters implements ParameterDefinition {
 		requireNonNegative("bike.constant_credits", bike.constant_credits);
 
 		if (!(car.congestionThresholdMedium <= car.congestionThresholdHigh)) {
-			throw new IllegalStateException("car.congestionThresholdMedium must not exceed car.congestionThresholdHigh");
+			throw new IllegalStateException(
+					"car.congestionThresholdMedium must not exceed car.congestionThresholdHigh");
 		}
 
 		if (!(carPassenger.occupancy >= 1.0)) {
@@ -110,7 +122,8 @@ public class MobilityCreditsParameters implements ParameterDefinition {
 
 	private static void requireWindow(String name, double start_h, double end_h) {
 		if (!(start_h >= 0.0 && start_h <= end_h && end_h <= 24.0)) {
-			throw new IllegalStateException(name + " must satisfy 0 <= start <= end <= 24, got " + start_h + "-" + end_h);
+			throw new IllegalStateException(
+					name + " must satisfy 0 <= start <= end <= 24, got " + start_h + "-" + end_h);
 		}
 	}
 }
