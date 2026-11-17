@@ -8,3 +8,4 @@ dependency-reduced-pom.xml
 *.idea
 simulation_output
 simulation_output_baseline
+runs/

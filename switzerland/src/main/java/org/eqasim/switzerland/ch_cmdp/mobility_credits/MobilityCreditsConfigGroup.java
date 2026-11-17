@@ -18,8 +18,8 @@ public final class MobilityCreditsConfigGroup extends ReflectiveConfigGroup {
 	public static final String GROUP_NAME = "mobilityCredits";
 
 	private boolean enabled = false;
-	private String parametersPath = "switzerland/src/main/java/org/eqasim/switzerland/ch_cmdp/mobility_credits/MobilityCreditsParameters.java";
-	private String congestionPath = "evaluation_results/csv_baseline/link_congestion_15min_bins.csv";
+	private String parametersPath = null;
+	private String congestionPath = null;
 	private String residentAttribute = "cantonName";
 	private String residentValue = "fribourg";
 

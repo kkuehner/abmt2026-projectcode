@@ -27,13 +27,13 @@ public class MobilityCreditsParameters implements ParameterDefinition {
 		 * Congestion ratio (congested / free-flow travel time) from which a link counts
 		 * as medium congested.
 		 */
-		public double congestionThresholdMedium = 1.2;
+		public double congestionThresholdMedium = 1.5;
 		/** Congestion ratio from which a link counts as highly congested. */
-		public double congestionThresholdHigh = 1.0;
+		public double congestionThresholdHigh = 2.0;
 		/** Credits per km driven on a medium-congested link. */
-		public double mediumCongestion_credits_km = 1.5;
+		public double mediumCongestion_credits_km = 0.5;
 		/** Credits per km driven on a highly congested link. */
-		public double highCongestion_credits_km = 2.0;
+		public double highCongestion_credits_km = 1.0;
 	}
 
 	public static class PtParameters {
@@ -69,8 +69,10 @@ public class MobilityCreditsParameters implements ParameterDefinition {
 
 	/**
 	 * Value of time used to convert credits into router disutility (seconds):
-	 * seconds per credit = creditValue_CHF * 3600 / routingValueOfTime_CHF_h. Same idea and default as
-	 * networkCalibration.tollsValueOfTime. Needed because the car time utility is non-linear, so there is no
+	 * seconds per credit = creditValue_CHF * 3600 / routingValueOfTime_CHF_h. Same
+	 * idea and default as
+	 * networkCalibration.tollsValueOfTime. Needed because the car time utility is
+	 * non-linear, so there is no
 	 * single value of time implied by the mode choice model.
 	 */
 	public double routingValueOfTime_CHF_h = 15.0;
