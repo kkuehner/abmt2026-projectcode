@@ -56,6 +56,14 @@ public class MobilityCreditsParameters implements ParameterDefinition {
 	 */
 	public double creditValue_CHF = 1.0;
 
+	/**
+	 * Value of time used to convert credits into router disutility (seconds):
+	 * seconds per credit = creditValue_CHF * 3600 / routingValueOfTime_CHF_h. Same idea and default as
+	 * networkCalibration.tollsValueOfTime. Needed because the car time utility is non-linear, so there is no
+	 * single value of time implied by the mode choice model.
+	 */
+	public double routingValueOfTime_CHF_h = 15.0;
+
 	public final CarParameters car = new CarParameters();
 	public final PtParameters pt = new PtParameters();
 	public final BikeParameters bike = new BikeParameters();
@@ -68,6 +76,12 @@ public class MobilityCreditsParameters implements ParameterDefinition {
 	/** Throws if the parameters are inconsistent. */
 	public void validate() {
 		requireNonNegative("creditValue_CHF", creditValue_CHF);
+
+		if (!(routingValueOfTime_CHF_h > 0.0) || !Double.isFinite(routingValueOfTime_CHF_h)) {
+			throw new IllegalStateException(
+					"routingValueOfTime_CHF_h must be finite and positive, got " + routingValueOfTime_CHF_h);
+		}
+
 		requireNonNegative("car.constant_credits", car.constant_credits);
 		requireNonNegative("car.distanceFactor_credits", car.distanceFactor_credits);
 		requireNonNegative("car.mediumCongestion_credits_km", car.mediumCongestion_credits_km);

@@ -4,6 +4,7 @@ import ch.sbb.matsim.config.SwissRailRaptorConfigGroup;
 import ch.sbb.matsim.mobsim.qsim.SBBTransitModule;
 import ch.sbb.matsim.mobsim.qsim.pt.SBBTransitEngineQSimModule;
 import org.eqasim.switzerland.ch_cmdp.StrategyWeightDecay.StrategyWeightDecayModule;
+import org.eqasim.switzerland.ch_cmdp.mobility_credits.MobilityCreditsRoutingModule;
 import org.eqasim.switzerland.ch_cmdp.tolls.TollsModule;
 import org.eqasim.switzerland.ch_cmdp.utils.link_stats.DetailedLinkStatisticsModule;
 import org.eqasim.switzerland.ch_cmdp.transit_dwell.SampledTransitDwellConfigGroup;
@@ -58,6 +59,7 @@ public class RunSimulation {
         controller.addOverridingModule(new PTLinkVolumesModule());
 		controller.addOverridingModule(new StrategyWeightDecayModule());
 		controller.addOverridingModule(new TollsModule());
+		controller.addOverridingModule(new MobilityCreditsRoutingModule()); // after TollsModule: wraps the car tolls routing
 		controller.addOverridingModule(new DetailedLinkStatisticsModule());
 
 		// To use the deterministic pt simulation (Part 1 of 2):
