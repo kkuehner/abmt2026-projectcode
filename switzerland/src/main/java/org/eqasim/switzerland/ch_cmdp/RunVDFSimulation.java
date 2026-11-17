@@ -29,7 +29,7 @@ public class RunVDFSimulation {
         // scenarios from a larger scenario.
         CommandLine cmd = new CommandLine.Builder(args) //
                 .requireOptions("config-path") //
-                .allowPrefixes("mode-parameter", "cost-parameter", "preventwaitingtoentertraffic", "samplingRateForPT", "generateNetworkEvents") //
+                .allowPrefixes("mode-parameter", "cost-parameter", "credit-parameter", "preventwaitingtoentertraffic", "samplingRateForPT", "generateNetworkEvents") //
                 .build();
 
         SwitzerlandConfigurator configurator = new SwitzerlandConfigurator(cmd);

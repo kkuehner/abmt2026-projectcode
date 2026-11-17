@@ -39,8 +39,13 @@ The occupancy split keeps car passenger from becoming a free way out of the sche
 
 **Congestion pricing on car links**
 - **Main version (B):** a fixed price per link and time slot, derived from baseline congestion (congested / free-flow travel time, grouped into a few levels).
+  - Input from Step 0 (CSV, may be gzipped, `,` or `;`): `link_id,time_bin_start_s,time_bin_end_s,congestion_ratio_per_link`.
+    The ratio is congested / free-flow travel time of the link in that bin.
+    One row per link and time bin; bins of a link must not overlap; links/times without a row count as uncongested (1.0).
+  - Ratio → credits (in the simulation, tunable): below `car.congestionThresholdMedium` → 0; medium/high level →
+    `car.mediumCongestion_credits_km` / `car.highCongestion_credits_km` × link length in km.
 - **Optional extension (C):** dynamic prices, updated every iteration from the previous iteration's travel times, smoothed to avoid oscillation.
-- Route choice uses the same link prices as mode choice, through the existing `tolls` module (extended to depend on time).
+- Route choice uses the same link prices as mode choice, through the eqasim policy framework's `RoutingPenalty` (already applied in `EqasimTravelDisutility`; the `tolls/` module is not needed).
 
 ### Utility
 `U = U_base + β_credit · credits − f(credit cost, balance, future trips)`
@@ -107,6 +112,15 @@ java -Xmx18g -cp <repo>/switzerland/target/switzerland-2.0.0.jar org.eqasim.swit
 ```
 Keep the seed (518745) and the git commit fixed across compared runs.
 
+**With mobility credits** (off by default, so the command above is the baseline), add:
+```bash
+  --config:mobilityCredits.enabled true \
+  --config:mobilityCredits.congestionPath <path/to/congestion.csv.gz> \
+  --credit-parameter:creditValue_CHF 1.0          # any parameter in MobilityCreditsParameters, e.g. car.constant_credits
+```
+Optional: `mobilityCredits.parametersPath` (yml with parameters), `residentAttribute` / `residentValue` (default `cantonName` = `fribourg`).
+The log shows how many persons are residents and how many links have congestion data.
+
 ## Brief for the coding agent – current step (Phase 1: simple model)
 
 > We study a mobility-credit scheme for Fribourg in the eqasim Swiss model (`switzerland/.../ch_cmdp`).
@@ -117,8 +131,8 @@ Keep the seed (518745) and the git commit fixed across compared runs.
 > 1. **Config group** `mobilityCredits`: enabled, resident filter (attribute + value), mode constants, PT time-slot factors, car distance term (log), β_credit (credits → utility), car-passenger occupancy, max acceptable walk/bike distance for the look-ahead, budget rule inputs (6 PT trips / 20 km car), path to link-price file, f parameters.
 > 2. **Link prices (B):** a tool that computes credit(link, time slot) from baseline output (congested / free-flow time, binned into levels) and writes a file; it is loaded at startup.
 > 3. **Credit cost model:** car = constant + sum of link prices along the routed path at estimated link entry times + log distance term; PT = constant × slot factor; bike = constant; walk = 0; car passenger = car credits ÷ occupancy. Existing costs live in `mode_choice/costs/` and `SwissCostParameters`.
-> 4. **Routing:** extend `tolls/` so car link disutility includes the time-dependent credit price (same prices as in 3).
-> 5. **Utility:** add `β_credit · credits` as a separate term, **not** inside `estimateMonetaryCostUtility` (that one multiplies by the income/distance interaction). Add `− f(...)` using the agent's remaining balance and remaining trips; start with a simple f that satisfies the four properties in the plan. Possible hook: `core/.../policies/utility/UtilityPenalty`. The DMC model type is `Tour`, with tours chosen sequentially.
+> 4. **Routing:** implement the policy framework's `RoutingPenalty` (`getLinkPenalty(link, person, time, …)`) with the same link prices as in 3, converted to router units as `CityTaxPolicyFactory` does. Do not modify `tolls/`.
+> 5. **Utility:** add `β_credit · credits` as a separate term, **not** inside `estimateMonetaryCostUtility` (that one multiplies by the income/distance interaction). Add `− f(...)` using the agent's remaining balance and remaining trips; start with a simple f that satisfies the four properties in the plan. Hooks: the credit term as a policy `UtilityPenalty` (per trip, template `policies/impl/city_tax/`); f in a custom `TourEstimator` wrapping `CumulativeTourEstimator`, because only the tour level sees previous tours (register with `bindTourEstimator`). The DMC model type is `Tour`, with tours chosen sequentially.
 > 6. **Look-ahead constraint:** a `TourConstraint` (register like the constraints in `SwissModeChoiceModule` / `EqasimVehicleTourConstraint`). It is created with all trips of the day; it rejects a tour candidate if the balance afterwards is below the minimum credits needed for the remaining trips (cheapest acceptable mode, walk/bike only up to the configured distances). Never exclude options via −∞ utility. Read the distance thresholds through a small interface (fixed per mode now; per-agent draws are a planned extension).
 > 7. **Output:** per trip: credits; per person: budget, credits used, remaining balance at end of day, number of candidates rejected by the look-ahead. One CSV per iteration.
 > 8. **Unit tests** for the cost model, link prices, budget, f and the look-ahead (a two-tour day where the morning car would leave the evening tour without options must be rejected); plus a regression test that the disabled scheme gives the same results as the baseline.
