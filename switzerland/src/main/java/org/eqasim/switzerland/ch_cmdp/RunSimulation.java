@@ -4,6 +4,7 @@ import ch.sbb.matsim.config.SwissRailRaptorConfigGroup;
 import ch.sbb.matsim.mobsim.qsim.SBBTransitModule;
 import ch.sbb.matsim.mobsim.qsim.pt.SBBTransitEngineQSimModule;
 import org.eqasim.switzerland.ch_cmdp.StrategyWeightDecay.StrategyWeightDecayModule;
+import org.eqasim.switzerland.ch_cmdp.mobility_credits.MobilityCreditsModule;
 import org.eqasim.switzerland.ch_cmdp.mobility_credits.MobilityCreditsRoutingModule;
 import org.eqasim.switzerland.ch_cmdp.tolls.TollsModule;
 import org.eqasim.switzerland.ch_cmdp.utils.link_stats.DetailedLinkStatisticsModule;
@@ -36,6 +37,7 @@ public class RunSimulation {
 		configurator.updateConfig(config);
 		configurator.configure(config);
 		cmd.applyConfiguration(config);
+		MobilityCreditsModule.adaptConfig(config); // after the command line: it may enable the credit budget
 
 		if (cmd.hasOption("preventwaitingtoentertraffic")) {
 			if (cmd.getOption("preventwaitingtoentertraffic").get().equals("y")) {

@@ -7,6 +7,7 @@ import org.eqasim.core.simulation.vdf.engine.VDFEngineConfigGroup;
 import org.eqasim.switzerland.ch.PTLinkVolumesModule;
 import org.eqasim.switzerland.ch.PTPassengerCountsModule;
 import org.eqasim.switzerland.ch_cmdp.StrategyWeightDecay.StrategyWeightDecayModule;
+import org.eqasim.switzerland.ch_cmdp.mobility_credits.MobilityCreditsModule;
 import org.eqasim.switzerland.ch_cmdp.mobility_credits.MobilityCreditsRoutingModule;
 import org.eqasim.switzerland.ch_cmdp.tolls.TollsModule;
 import org.matsim.api.core.v01.Scenario;
@@ -40,6 +41,7 @@ public class RunVDFSimulation {
         configurator.updateConfig(config);
         configurator.configure(config);
         cmd.applyConfiguration(config);
+        MobilityCreditsModule.adaptConfig(config); // after the command line: it may enable the credit budget
 
         // add vdf module to the config
         VDFConfigGroup vdfConfig = VDFConfigGroup.getOrCreate(config);

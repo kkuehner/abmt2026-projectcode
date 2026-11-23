@@ -52,6 +52,26 @@ public class MobilityCreditsParameters implements ParameterDefinition {
 		public double constant_credits = 0.1;
 	}
 
+	/** Budget and look-ahead (Project_Plan.md D6, D7, D10). */
+	public static class BudgetParameters {
+		/** Budget covers this many PT trips (off-peak price). */
+		public double ptTrips = 6.0;
+		/** Budget covers a car round trip of 2 x this distance (uncongested price). */
+		public double carRoundTripOneWay_km = 10.0;
+		/** Look-ahead: a remaining trip up to this distance can be walked (0 credits). */
+		public double walkMax_km = 2.0;
+		/** Look-ahead: a remaining trip up to this distance can be cycled. */
+		public double bikeMax_km = 8.0;
+		/** Straight-line distance x this factor = estimated travel distance of a remaining trip. */
+		public double beelineFactor = 1.3;
+	}
+
+	/** Scarcity penalty f = weight * (credit term per credit) * c_tour * s^exponent (Project_Plan.md D11). */
+	public static class ScarcityParameters {
+		public double weight = 1.0;
+		public double exponent = 2.0;
+	}
+
 	public static class CarPassengerParameters {
 		/**
 		 * Car passengers pay the car credits of the same trip divided by this
@@ -81,6 +101,8 @@ public class MobilityCreditsParameters implements ParameterDefinition {
 	public final PtParameters pt = new PtParameters();
 	public final BikeParameters bike = new BikeParameters();
 	public final CarPassengerParameters carPassenger = new CarPassengerParameters();
+	public final BudgetParameters budget = new BudgetParameters();
+	public final ScarcityParameters scarcity = new ScarcityParameters();
 
 	public static MobilityCreditsParameters buildDefault() {
 		return new MobilityCreditsParameters();
@@ -110,6 +132,17 @@ public class MobilityCreditsParameters implements ParameterDefinition {
 
 		if (!(carPassenger.occupancy >= 1.0)) {
 			throw new IllegalStateException("carPassenger.occupancy must be at least 1");
+		}
+
+		requireNonNegative("budget.ptTrips", budget.ptTrips);
+		requireNonNegative("budget.carRoundTripOneWay_km", budget.carRoundTripOneWay_km);
+		requireNonNegative("budget.walkMax_km", budget.walkMax_km);
+		requireNonNegative("budget.bikeMax_km", budget.bikeMax_km);
+		requireNonNegative("scarcity.weight", scarcity.weight);
+		requireNonNegative("scarcity.exponent", scarcity.exponent);
+
+		if (!(budget.beelineFactor >= 1.0)) {
+			throw new IllegalStateException("budget.beelineFactor must be at least 1, got " + budget.beelineFactor);
 		}
 
 		requireWindow("pt.morningPeak", pt.morningPeakStart_h, pt.morningPeakEnd_h);

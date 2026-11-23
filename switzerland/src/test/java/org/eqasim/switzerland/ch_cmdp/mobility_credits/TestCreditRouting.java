@@ -35,6 +35,10 @@ import org.matsim.core.scenario.ScenarioUtils;
 import org.matsim.core.network.NetworkUtils;
 import org.matsim.core.trafficmonitoring.FreeSpeedTravelTime;
 
+import static org.mockito.Mockito.mock;
+
+import org.matsim.core.controler.OutputDirectoryHierarchy;
+
 import com.google.inject.Key;
 import com.google.inject.TypeLiteral;
 
@@ -68,7 +72,10 @@ public class TestCreditRouting {
 		Person resident = addPerson(scenario, "resident", "fribourg");
 		Person visitor = addPerson(scenario, "visitor", "bern");
 
-		var parameters = MobilityCreditsParameters.buildDefault(); // high congestion: 1 credit/km
+		var parameters = MobilityCreditsParameters.buildDefault();
+		parameters.car.congestionThresholdMedium = 1.2; // ratio 1.6 counts as high: 1 credit/km
+		parameters.car.congestionThresholdHigh = 1.5;
+		parameters.car.highCongestion_credits_km = 1.0;
 		parameters.creditValue_CHF = 2.0;
 		parameters.routingValueOfTime_CHF_h = 18.0; // 2 CHF at 18 CHF/h = 400 s per credit
 		double secondsPerCredit = CreditTravelDisutilityFactory.secondsPerCredit(parameters);
@@ -112,6 +119,7 @@ public class TestCreditRouting {
 				addTravelTimeBinding(TransportMode.car).toInstance(new FreeSpeedTravelTime());
 				bind(new TypeLiteral<Map<String, Policy>>() {
 				}).toInstance(Map.of());
+				bind(OutputDirectoryHierarchy.class).toInstance(mock(OutputDirectoryHierarchy.class));
 			}
 		};
 

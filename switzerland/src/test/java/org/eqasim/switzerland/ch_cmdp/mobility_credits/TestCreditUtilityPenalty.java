@@ -36,6 +36,15 @@ import org.matsim.core.scenario.ScenarioByInstanceModule;
 import org.matsim.core.scenario.ScenarioUtils;
 import org.matsim.core.trafficmonitoring.FreeSpeedTravelTime;
 
+import org.matsim.contribs.discrete_mode_choice.components.estimators.CumulativeTourEstimator;
+import org.matsim.contribs.discrete_mode_choice.model.tour_based.TourConstraintFactory;
+import org.matsim.contribs.discrete_mode_choice.model.tour_based.TourEstimator;
+import org.matsim.contribs.discrete_mode_choice.model.trip_based.TripEstimator;
+import org.matsim.core.controler.OutputDirectoryHierarchy;
+import org.matsim.core.utils.timing.TimeInterpretation;
+
+import com.google.inject.Key;
+import com.google.inject.Provider;
 import com.google.inject.TypeLiteral;
 
 public class TestCreditUtilityPenalty {
@@ -132,6 +141,10 @@ public class TestCreditUtilityPenalty {
 				}).toInstance(Map.of("existing", existingPolicy));
 				// stands in for the core PolicyModule binding that the credit module overrides
 				bind(UtilityPenalty.class).toInstance(existingPolicy.getUtilityPenalty());
+				// provided by MATSim / DMC in a real run
+				bind(OutputDirectoryHierarchy.class).toInstance(mock(OutputDirectoryHierarchy.class));
+				bind(CumulativeTourEstimator.class).toInstance(
+						new CumulativeTourEstimator(mock(TripEstimator.class), TimeInterpretation.create(config)));
 			}
 		};
 
@@ -181,5 +194,24 @@ public class TestCreditUtilityPenalty {
 		assertEquals(0.5 + 0.1 * CAR_CREDITS, penalty.calculatePenalty("car", resident, trip(), elements), DELTA);
 		assertEquals(0.5, penalty.calculatePenalty("car", visitor, trip(), elements), DELTA);
 		assertTrue(injector.getInstance(ResidentFilter.class).isResident(resident));
+	}
+
+	@Test
+	public void budgetRegistersTourEstimatorAndConstraintUnderDmcNames() {
+		MobilityCreditsConfigGroup creditConfig = new MobilityCreditsConfigGroup();
+		creditConfig.setEnabled(true);
+		creditConfig.setBudgetEnabled(true);
+		Config config = ConfigUtils.createConfig(creditConfig);
+		var injector = inject(config, scenario(config), constantPolicy(0.0));
+
+		var estimators = injector.getInstance(Key.get(new TypeLiteral<Map<String, Provider<TourEstimator>>>() {
+		}));
+		var constraints = injector
+				.getInstance(Key.get(new TypeLiteral<Map<String, Provider<TourConstraintFactory>>>() {
+				}));
+
+		assertTrue(estimators.get(MobilityCreditsModule.TOUR_ESTIMATOR).get() instanceof CreditTourEstimator);
+		assertTrue(constraints.get(MobilityCreditsModule.BUDGET_CONSTRAINT)
+				.get() instanceof CreditBudgetConstraint.Factory);
 	}
 }

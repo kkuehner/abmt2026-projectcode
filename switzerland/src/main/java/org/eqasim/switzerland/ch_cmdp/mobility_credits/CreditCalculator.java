@@ -118,6 +118,32 @@ public class CreditCalculator {
 		return parameters.pt.constant_credits * factor;
 	}
 
+	/** Credits of one PT trip departing at the given time (route independent). */
+	public double getPtTripCredits(double departureTime) {
+		return calculatePtCredits(departureTime);
+	}
+
+	/** Credits of one PT trip outside the peak windows. */
+	public double getOffPeakPtTripCredits() {
+		return parameters.pt.constant_credits;
+	}
+
+	/** Credits of one bike trip. */
+	public double getBikeTripCredits() {
+		return parameters.bike.constant_credits;
+	}
+
+	/** Credits of one car trip of the given distance without any congestion. */
+	public double getUncongestedCarTripCredits(double distance_km) {
+		return parameters.car.constant_credits + parameters.car.distanceFactor_credits * Math.log1p(distance_km);
+	}
+
+	/** True for car and car passenger (incl. "_loop" variants): the modes the budget may forbid. */
+	public static boolean isCarMode(String mode) {
+		String base = baseMode(mode);
+		return base.equals(TransportMode.car) || base.equals(CAR_PASSENGER);
+	}
+
 	private double calculateCarCredits(String mode, double departureTime, List<? extends PlanElement> elements) {
 		String base = baseMode(mode);
 		double distance_m = 0.0;

@@ -22,6 +22,8 @@ public final class MobilityCreditsConfigGroup extends ReflectiveConfigGroup {
 	private String congestionPath = null;
 	private String residentAttribute = "cantonName";
 	private String residentValue = "fribourg";
+	private boolean budgetEnabled = false;
+	private int outputInterval = 10;
 
 	public MobilityCreditsConfigGroup() {
 		super(GROUP_NAME);
@@ -39,6 +41,26 @@ public final class MobilityCreditsConfigGroup extends ReflectiveConfigGroup {
 	@StringSetter("enabled")
 	public void setEnabled(boolean enabled) {
 		this.enabled = enabled;
+	}
+
+	@StringGetter("budgetEnabled")
+	public boolean isBudgetEnabled() {
+		return budgetEnabled;
+	}
+
+	@StringSetter("budgetEnabled")
+	public void setBudgetEnabled(boolean budgetEnabled) {
+		this.budgetEnabled = budgetEnabled;
+	}
+
+	@StringGetter("outputInterval")
+	public int getOutputInterval() {
+		return outputInterval;
+	}
+
+	@StringSetter("outputInterval")
+	public void setOutputInterval(int outputInterval) {
+		this.outputInterval = outputInterval;
 	}
 
 	@StringGetter("parametersPath")
@@ -98,6 +120,11 @@ public final class MobilityCreditsConfigGroup extends ReflectiveConfigGroup {
 		comments.put("residentAttribute", "Person attribute that identifies participants of the scheme.");
 		comments.put("residentValue",
 				"Value of residentAttribute for participants. Everyone else is exempt (unlimited credits).");
+		comments.put("budgetEnabled", "Adds the daily budget, look-ahead constraint and scarcity penalty (Phase 1b). "
+				+ "Default: false (pricing only). Requires DiscreteModeChoice modelType 'Tour' and tourEstimator "
+				+ "'Cumulative'; the run scripts then switch the DMC settings automatically.");
+		comments.put("outputInterval",
+				"Write mobility_credits_persons.csv.gz every n iterations (and in the last one). 0: last only.");
 		return comments;
 	}
 }
