@@ -26,6 +26,27 @@ daily mobility-credit budget with congestion-dependent credit prices. Then check
 The shift is strongest for 2–20 km trips (car −5 to −6 pp, mostly to PT); trips above 50 km don't change.
 Source: `evaluation_base_vs_phase1/`.
 
+### 1a
+
+The pricing-only rerun used the regenerated baseline TTI table with a minimum of five simulated traversals per link per 15-minute bin. Person and trip metrics use the simulation's Fribourg resident filter (`cantonName = fribourg`). Network delay includes all traffic.
+
+| Indicator | Baseline | Pricing (1a) | Change |
+|---|---:|---:|---:|
+| Resident driver vehicle-km | 5.55 M | 5.18 M | −6.7 % |
+| Car driver share | 51.17 % | 46.95 % | −4.22 pp |
+| Car passenger share | 12.80 % | 13.25 % | +0.45 pp |
+| Public transport share | 11.19 % | 13.03 % | +1.84 pp |
+| Walking share | 22.48 % | 23.87 % | +1.40 pp |
+| Cycling share | 2.36 % | 2.90 % | +0.53 pp |
+| All-day network delay (veh·h) | 55,663 | 50,243 | −9.7 % |
+| Peak network delay (veh·h), 07:00–09:00 and 16:00–19:00 | 24,648 | 21,378 | −13.3 % |
+
+Driver vehicle-km uses resident `car` legs scaled from the 10 % sample. Changes use unrounded values.
+
+In 1a, **34.9 % of residents** used more than the proposed **11.59-credit** daily allowance. This gives a reference for how much demand the default 1b budget might affect. Actual budget pressure will depend on how residents adapt and whose allowance is raised.
+
+[Mode share by driver and passenger](evaluation_baseline_vs_phase1a_updated/plots/09_mode_share_car_driver_passenger.png) · [Network delay and TTI](evaluation_baseline_vs_phase1a_updated/plots/08_network_congestion_15min.png)
+
 ## Decisions & parameters (single source of truth)
 
 ### Design decisions
@@ -40,7 +61,7 @@ Source: `evaluation_base_vs_phase1/`.
 | D6 | Budget B (equal) | `B = max(6 PT trips, one car round trip of 2 × 10 km)`, both at **off-peak / uncongested** prices | A car day has ≥ 2 trips: pricing the allowance as one 20 km trip would forbid almost every car commute |
 | D7 | Budget too small for a day | `B_person = max(B, minimum credits the agent's day needs)` | Every agent must keep a feasible day |
 | D8 | Unaffordable options | Excluded by a **look-ahead constraint** (never by utility 0 / −∞) | Tours are chosen one after another; without look-ahead the morning tour can strand the evening tour |
-| D9 | Safety net | Options **without car / car passenger** are never rejected; overspending is logged | Guarantees a feasible option (else the run crashes), even for tours DMC doesn't replan or for estimation errors |
+| D9 | Safety net | The budget admits feasible options without car or car passenger. If it blocks every otherwise feasible option, allow the smallest projected overrun and log it. | Keeps forced car tours feasible while preserving mode and routing constraints |
 | D10 | Future need (look-ahead) | Per remaining trip: walk if ≤ 2 km, bike if ≤ 8 km, else PT; distance = straight line × 1.3 | No routing needed; PT credits don't depend on the route |
 | D11 | Scarcity penalty f | `f = w · (credit term per credit) · c_tour · s^k`, `s = (c_tour + future need) / balance` (0..1) | Plenty left → s ≈ 0 → ~no penalty; tight → full penalty |
 | D12 | Budget calibration check | Later: check B against the baseline's daily credits per resident ("B covers X %"), may replace D6 | Ties B to observed behaviour instead of a rule of thumb |
@@ -75,14 +96,9 @@ Source: `evaluation_base_vs_phase1/`.
 
 ## Open issues
 
-1. **TTI noise in the congestion file.**
-   - 55 % of "high congestion" bins (TTI ≥ 2) come from only 1–2 simulated vehicles.
-   - 16 % of night bins (0–5h) have TTI ≥ 2: intersection delay on short links, not congestion.
-   - Fix: only keep bins with a minimum volume (e.g. ≥ 5 simulated vehicles) when writing the file.
-2. **Evaluation merges car passenger into "Car"**: shifts to riding along are invisible, and car km include passenger km.
-3. **Evaluation's resident filter** uses `in_boundary` / `is_resident` and falls back to *all persons*;
-   the simulation uses `cantonName = fribourg`. Make sure both match.
-4. **Congestion file without an end-time column** is read as 15-min bins (hard-coded 900 s in `LinkCongestionTable`).
+**Forced car tours can exceed the credit budget.** In 1b, resident `1176674` reached a zero-distance `car_loop` from the input with 0.7437 credits remaining. The loop cost 1 credit, and the mode rules offered no walking or other non-car option. The budget rejected the only option and replanning stopped.
+
+The tour model now checks vehicle continuity, trip rules, routing and utility as usual. A feasible walking tour remains available through the non-car safety net. If the budget rules out every otherwise feasible tour, the model selects the one with the smallest projected credit overrun. Each exception logs the resident, trip number, modes and projected overrun, and the iteration credit summary reports the count. The current look-ahead still estimates future needs from distance, so it can miss forced modes.
 
 ## Model
 
@@ -109,7 +125,8 @@ for each tour of the day, in order:
      utility (incl. credit term) − f
      look-ahead: credits of earlier tours + this tour + minimum future need ≤ B_person ?
                  no → reject, unless the option uses neither car nor car passenger (D9)
-  logit picks one option
+  logit picks one admitted option
+  if only budget-rejected options remain: choose the smallest overrun and log it
 ```
 
 **Phase-3 extension:** per-agent walk/bike distance limits, drawn once per agent (person id + seed) from a
@@ -156,7 +173,7 @@ tourEstimator `Cumulative`, which the Fribourg config has.
 
 **Credit output** (whenever credits are enabled, also without budget):
 - Log line per iteration: mean credits/day, % of residents with < 10 % budget left, % over budget, % budget raised,
-  options rejected by the look-ahead, options accepted by the safety net.
+  options rejected by the look-ahead, options accepted by the safety net, and forced budget overflows selected.
 - `ITERS/it.N/N.mobility_credits_persons.csv.gz` every `mobilityCredits.outputInterval` iterations (default 10)
   and in the last: budget, credits used, balance, credits per mode per resident.
 - `mobility_credits_trips.csv.gz` in the last iteration: credits per trip.

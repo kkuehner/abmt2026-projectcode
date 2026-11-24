@@ -4,9 +4,8 @@ MATSim / Eqasim Evaluation & Congestion Extraction Script
 Project: Tradable Mobility Credits with Dynamic Pricing (Canton of Fribourg)
 
 Updates:
-- Population / Trip plots and socio-demographic metrics strictly filter for Fribourg 
-  cantonal residents (excluding external agents, through-traffic, and freight as per 
-  Validation_08.pdf standards).
+- Population and trip metrics use the mobility credits resident rule:
+  cantonName must equal fribourg.
 - Road congestion extraction (`extract_link_congestion_from_events`) includes ALL vehicles 
   on the network (residents, cross-border travelers, and freight) to ensure total physical 
   congestion is accurately measured.
@@ -19,7 +18,8 @@ python evaluate_matsim_fribourg.py \
   --label_base "Baseline" \
   --label_comp "Dynamic Credits" \
   --out_dir ./evaluation_comparison \
-  --sample_factor 10.0
+  --sample_factor 10.0 \
+  --min_sim_vehicles 5
 """
 import os
 import gzip
@@ -66,10 +66,8 @@ def find_file(directory, candidates):
 
 def load_persons_and_trips(sim_dir):
     """
-    Loads person and trip tables. 
-    - Filters trips and persons to include ONLY Fribourg residents inside the 
-      scenario boundary (excluding external agents, freight, and through-traffic 
-      for socio-demographic and mode share evaluations).
+    Loads person and trip tables for people with cantonName = fribourg,
+    matching the mobility credits simulation's resident filter.
     """
     trips_file = find_file(sim_dir, [
         "eqasim_trips.csv", "eqasim_trips.csv.gz",
@@ -82,9 +80,12 @@ def load_persons_and_trips(sim_dir):
 
     if not trips_file:
         raise FileNotFoundError(f"Could not find trips file in {sim_dir}")
+    if not persons_file:
+        raise FileNotFoundError(f"Could not find a persons file with cantonName in {sim_dir}")
 
-    trips = pd.read_csv(trips_file, sep=None, engine="python")
-    persons = pd.read_csv(persons_file, sep=None, engine="python") if persons_file else None
+    person_id_types = {"person": str, "person_id": str}
+    trips = pd.read_csv(trips_file, sep=None, engine="python", dtype=person_id_types)
+    persons = pd.read_csv(persons_file, sep=None, engine="python", dtype=person_id_types)
 
     # Standardize column names
     col_map_trips = {
@@ -96,26 +97,21 @@ def load_persons_and_trips(sim_dir):
         "trav_time": "travel_time",
         "end_activity_type": "following_purpose"
     }
-    trips.rename(columns={k: v for k, v in col_map_trips.items() if k in trips.columns and v not in trips.columns}, inplace=True)
+    trips = trips.rename(columns={
+        k: v for k, v in col_map_trips.items() if k in trips.columns and v not in trips.columns
+    })
 
-    if persons is not None:
-        if "person" in persons.columns and "person_id" not in persons.columns:
-            persons.rename(columns={"person": "person_id"}, inplace=True)
+    if "person" in persons.columns and "person_id" not in persons.columns:
+        persons = persons.rename(columns={"person": "person_id"})
 
-    # STRICT RESIDENT FILTERING:
-    resident_person_ids = set()
-    if persons is not None:
-        if "in_boundary" in persons.columns:
-            res_df = persons[persons["in_boundary"].astype(str).str.lower().isin(["true", "1", "yes"])]
-            resident_person_ids = set(res_df["person_id"])
-        elif "is_resident" in persons.columns:
-            res_df = persons[persons["is_resident"].astype(str).str.lower().isin(["true", "1", "yes"])]
-            resident_person_ids = set(res_df["person_id"])
-        else:
-            resident_person_ids = set(persons["person_id"])
+    if "cantonName" not in persons.columns:
+        raise ValueError(f"Missing cantonName in {persons_file}; required to identify Fribourg residents")
+    for file_path, table in ((persons_file, persons), (trips_file, trips)):
+        if "person_id" not in table.columns:
+            raise ValueError(f"Missing person ID column (person or person_id) in {file_path}")
 
-        if "person_id" in trips.columns and resident_person_ids:
-            trips = trips[trips["person_id"].isin(resident_person_ids)].copy()
+    persons = persons.loc[persons["cantonName"].eq("fribourg") & persons["person_id"].notna()].copy()
+    trips = trips.loc[trips["person_id"].isin(persons["person_id"])].copy()
 
     # Convert distances from meters to km if needed
     for dist_col in ["crowfly_distance", "routed_distance"]:
@@ -127,7 +123,7 @@ def load_persons_and_trips(sim_dir):
 
     # Parse departure time
     if "departure_time" in trips.columns:
-        if trips["departure_time"].dtype == object:
+        if not pd.api.types.is_numeric_dtype(trips["departure_time"]):
             def parse_time(t_str):
                 try:
                     parts = str(t_str).split(":")
@@ -228,12 +224,23 @@ def parse_network_xml(network_path):
                 elem.clear()
     return pd.DataFrame.from_dict(links, orient="index")
 
-def extract_link_congestion_from_events(events_path, network_df, sample_factor=10.0, bin_size_s=900):
+DEFAULT_MIN_SIM_VEHICLES = 5
+
+
+def extract_link_congestion_from_events(
+    events_path, network_df, sample_factor=10.0, bin_size_s=900,
+    min_sim_vehicles=DEFAULT_MIN_SIM_VEHICLES
+):
     """
     Parses output_events.xml(.gz) including ALL vehicles (residents, through-traffic, 
     and freight) to calculate the primary road congestion metric: 
     Travel Time Index (TTI) in 15-minute bins (default bin_size_s = 900s).
+    Bins below the minimum completed traversal count get a neutral TTI of 1.0.
+    Observed TTI and delay remain available for inspection.
     """
+    if min_sim_vehicles < 1:
+        raise ValueError("min_sim_vehicles must be at least 1")
+
     open_fn = gzip.open if events_path.endswith(".gz") else open
     valid_links = set(network_df["link_id"].unique())
     enter_times = {}
@@ -285,8 +292,9 @@ def extract_link_congestion_from_events(events_path, network_df, sample_factor=1
         scaled_volume = sim_count * sample_factor
         total_delay_veh_hours = (delay_per_veh_s * scaled_volume) / 3600.0
 
-        # PRIMARY CONGESTION METRIC: Travel Time Index (TTI)
-        tti = avg_tt / free_tt if free_tt > 0 else 1.0
+        observed_tti = avg_tt / free_tt if free_tt > 0 else 1.0
+        low_volume = sim_count < min_sim_vehicles
+        tti = 1.0 if low_volume else observed_tti
         bin_hour = time_bin * (bin_size_s / 3600.0)
 
         rows.append({
@@ -301,7 +309,9 @@ def extract_link_congestion_from_events(events_path, network_df, sample_factor=1
             "avg_travel_time_s": round(avg_tt, 3),
             "avg_delay_s": round(delay_per_veh_s, 3),
             "total_delay_veh_h": round(total_delay_veh_hours, 4),
-            "tti": round(tti, 4)
+            "tti": round(tti, 4),
+            "observed_tti": round(observed_tti, 4),
+            "low_volume": low_volume
         })
 
     bin_df = pd.DataFrame(rows)
@@ -316,11 +326,18 @@ def extract_link_congestion_from_events(events_path, network_df, sample_factor=1
             "daily_scaled_volume": g["scaled_volume_15min"].sum(),
             "daily_total_delay_veh_h": g["total_delay_veh_h"].sum(),
             "weighted_avg_tti": np.average(g["tti"], weights=g["scaled_volume_15min"]) if g["scaled_volume_15min"].sum() > 0 else 1.0,
-            "max_15min_tti": g["tti"].max(),
-            "peak_congested_bin": g.loc[g["tti"].idxmax(), "time_bin_15min"],
-            "peak_congested_hour": g.loc[g["tti"].idxmax(), "bin_start_hour"]
+            "max_15min_tti": g["tti"].max()
         })
     ).reset_index()
+
+    congested_bins = bin_df.loc[bin_df["tti"] > 1.0]
+    peak_indices = congested_bins.groupby("link_id")["tti"].idxmax()
+    peaks = congested_bins.loc[peak_indices, ["link_id", "time_bin_15min", "bin_start_hour"]]
+    peaks = peaks.rename(columns={
+        "time_bin_15min": "peak_congested_bin",
+        "bin_start_hour": "peak_congested_hour",
+    })
+    daily_agg = daily_agg.merge(peaks, on="link_id", how="left")
 
     return bin_df, daily_agg
 
@@ -354,6 +371,13 @@ def compute_and_export_metrics(persons, trips, bin_cong, daily_cong, out_dir, sa
     ).rename("mode_share_pct").reset_index().rename(columns={"index": "mode", "mode_clean": "mode"})
     ms_general.to_csv(os.path.join(out_dir, "mode_share_general.csv"), index=False)
     metrics_dict["ms_general"] = ms_general
+
+    is_car_passenger = trips["mode"].astype(str).str.lower().isin(["car_passenger", "ride"])
+    split_modes = trips["mode_clean"].replace("Car", "Car Driver").mask(is_car_passenger, "Car Passenger")
+    split_order = ["Car Driver", "Car Passenger", *mode_order[1:]]
+    metrics_dict["ms_split"] = (
+        split_modes.value_counts(normalize=True).reindex(split_order, fill_value=0.0) * 100.0
+    ).rename_axis("mode").reset_index(name="mode_share_pct")
 
     if "distance_bin" in trips.columns:
         ms_dist = (
@@ -416,8 +440,11 @@ def compute_and_export_metrics(persons, trips, bin_cong, daily_cong, out_dir, sa
 # ==============================================================================
 # 5. PLOTTING FUNCTIONS
 # ==============================================================================
-def plot_grouped_bars(df_base, df_comp, x_col, y_col, title, ylabel, out_path, label_base="Baseline", label_comp="Policy"):
-    fig, ax = plt.subplots(figsize=(6.5, 4.2))
+def plot_grouped_bars(
+    df_base, df_comp, x_col, y_col, title, ylabel, out_path,
+    label_base="Baseline", label_comp="Policy", figsize=(6.5, 4.2)
+):
+    fig, ax = plt.subplots(figsize=figsize)
     x_labels = df_base[x_col].astype(str).tolist()
     x = np.arange(len(x_labels))
     if df_comp is not None:
@@ -439,10 +466,19 @@ def plot_grouped_bars(df_base, df_comp, x_col, y_col, title, ylabel, out_path, l
     plt.close(fig)
 
 def plot_2x2_mode_grid(df_base, df_comp, x_col, title_suffix, out_path, label_base="Baseline", label_comp="Policy"):
+    df_base = df_base.set_index(x_col)
+    if df_comp is not None:
+        df_comp = df_comp.set_index(x_col)
+        groups = df_base.index.union(df_comp.index, sort=False)
+        df_base = df_base.reindex(groups, fill_value=0.0)
+        df_comp = df_comp.reindex(groups, fill_value=0.0)
+    if df_base.empty:
+        return
+
     modes = ["Car", "Public Transport", "Bike", "Walk"]
     fig, axes = plt.subplots(2, 2, figsize=(11, 7.5))
     axes = axes.flatten()
-    x_labels = df_base[x_col].astype(str).tolist()
+    x_labels = df_base.index.astype(str).tolist()
     x = np.arange(len(x_labels))
     for i, mode in enumerate(modes):
         ax = axes[i]
@@ -546,7 +582,7 @@ def plot_15min_network_congestion(bin_cong_base, bin_cong_comp, out_path, label_
     ax1.plot(b_agg["hour"], b_agg["delay_vh"], label=label_base, color=COLOR_BASELINE if c_agg is not None else COLOR_POLICY, linewidth=1.5)
     if c_agg is not None:
         ax1.plot(c_agg["hour"], c_agg["delay_vh"], label=label_comp, color=COLOR_POLICY, linewidth=1.5)
-    ax1.set_title("Network Congestion Delay by 15-min Bin")
+    ax1.set_title("Observed Network Delay by 15-min Bin")
     ax1.set_xlabel("Hour of Day")
     ax1.set_ylabel("Total Delay [Vehicle-Hours]")
     ax1.legend(loc="upper left")
@@ -576,7 +612,13 @@ def main():
     parser.add_argument("--label_comp", default="Policy", help="Legend label for comparison.")
     parser.add_argument("--out_dir", default="./evaluation_output", help="Output directory.")
     parser.add_argument("--sample_factor", type=float, default=10.0, help="Sample factor (10.0 for 10% sample).")
+    parser.add_argument(
+        "--min_sim_vehicles", type=int, default=DEFAULT_MIN_SIM_VEHICLES,
+        help="Minimum completed simulated traversals per link and bin for TTI (default: %(default)s).",
+    )
     args = parser.parse_args()
+    if args.min_sim_vehicles < 1:
+        parser.error("--min_sim_vehicles must be at least 1")
 
     os.makedirs(args.out_dir, exist_ok=True)
     print(f"[1/4] Loading Fribourg residents and trips from {args.sim_dir}...")
@@ -590,7 +632,8 @@ def main():
         print(f"[2/4] Extracting link congestion in 15-min bins (INCLUDES EVERYONE: residents, freight, cross-border)...")
         net_df = parse_network_xml(net_file)
         bin_cong_base, daily_cong_base = extract_link_congestion_from_events(
-            events_file, net_df, sample_factor=args.sample_factor, bin_size_s=900
+            events_file, net_df, sample_factor=args.sample_factor,
+            min_sim_vehicles=args.min_sim_vehicles
         )
 
     print(f"[3/4] Exporting metrics CSVs...")
@@ -611,7 +654,8 @@ def main():
         if net_c and ev_c:
             net_df_c = parse_network_xml(net_c)
             bin_cong_comp, daily_cong_comp = extract_link_congestion_from_events(
-                ev_c, net_df_c, sample_factor=args.sample_factor, bin_size_s=900
+                ev_c, net_df_c, sample_factor=args.sample_factor,
+                min_sim_vehicles=args.min_sim_vehicles
             )
         metrics_comp = compute_and_export_metrics(
             persons_comp, trips_comp, bin_cong_comp, daily_cong_comp,
@@ -682,6 +726,16 @@ def main():
             out_path=os.path.join(plots_dir, "08_network_congestion_15min.png"),
             label_base=args.label_base, label_comp=args.label_comp
         )
+
+    plot_grouped_bars(
+        metrics_base["ms_split"], metrics_comp.get("ms_split"),
+        x_col="mode", y_col="mode_share_pct",
+        title="Resident Trip Mode Share",
+        ylabel="Mode share (%)",
+        out_path=os.path.join(plots_dir, "09_mode_share_car_driver_passenger.png"),
+        label_base=args.label_base, label_comp=args.label_comp,
+        figsize=(8, 4.2)
+    )
 
     print("Evaluation complete successfully with 15-minute congestion bins!")
 

@@ -168,9 +168,9 @@ public class CreditOutputListener implements IterationEndsListener {
 		logger.info(String.format(Locale.US,
 				"Mobility credits it.%d: %d residents, mean %.2f credits/day, %.1f%% with < 10%% budget left, "
 						+ "%.1f%% over budget, %.1f%% budget raised to minimum need; look-ahead: %d options rejected, "
-						+ "%d accepted by safety net",
+						+ "%d accepted by safety net, %d forced budget overflows selected",
 				event.getIteration(), residents, residents == 0 ? 0.0 : totalUsed / residents, percent(tight, residents),
-				percent(overBudget, residents), percent(raised, residents), counters[0], counters[1]));
+				percent(overBudget, residents), percent(raised, residents), counters[0], counters[1], counters[2]));
 	}
 
 	private static double percent(int count, int total) {

@@ -6,6 +6,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public class CreditStats {
 	private final AtomicLong rejected = new AtomicLong();
 	private final AtomicLong safetyNetAccepted = new AtomicLong();
+	private final AtomicLong forcedOverflow = new AtomicLong();
 
 	void countRejected() {
 		rejected.incrementAndGet();
@@ -15,8 +16,12 @@ public class CreditStats {
 		safetyNetAccepted.incrementAndGet();
 	}
 
-	/** Returns {rejected, safety-net accepts} since the last call and resets both. */
+	void countForcedOverflow() {
+		forcedOverflow.incrementAndGet();
+	}
+
+	/** Returns {rejected, safety-net accepts, forced overflows} since the last call and resets the counters. */
 	long[] getAndReset() {
-		return new long[] { rejected.getAndSet(0), safetyNetAccepted.getAndSet(0) };
+		return new long[] { rejected.getAndSet(0), safetyNetAccepted.getAndSet(0), forcedOverflow.getAndSet(0) };
 	}
 }

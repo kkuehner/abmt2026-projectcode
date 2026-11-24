@@ -9,3 +9,6 @@ dependency-reduced-pom.xml
 simulation_output
 simulation_output_baseline
 runs/
+
+# Generated link-level congestion exports
+/evaluation_*/**/link_congestion_15min_bins.csv

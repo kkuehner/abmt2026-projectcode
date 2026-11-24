@@ -9,6 +9,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Random;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -17,11 +19,18 @@ import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.population.Person;
 import org.matsim.api.core.v01.population.Plan;
 import org.matsim.contribs.discrete_mode_choice.model.DiscreteModeChoiceTrip;
+import org.matsim.contribs.discrete_mode_choice.model.DiscreteModeChoiceModel.FallbackBehaviour;
+import org.matsim.contribs.discrete_mode_choice.model.DiscreteModeChoiceModel.NoFeasibleChoiceException;
+import org.matsim.contribs.discrete_mode_choice.model.constraints.CompositeTourConstraintFactory;
+import org.matsim.contribs.discrete_mode_choice.model.mode_chain.DefaultModeChainGenerator;
 import org.matsim.contribs.discrete_mode_choice.model.tour_based.DefaultTourCandidate;
+import org.matsim.contribs.discrete_mode_choice.model.tour_based.TourBasedModel;
 import org.matsim.contribs.discrete_mode_choice.model.tour_based.TourCandidate;
+import org.matsim.contribs.discrete_mode_choice.model.tour_based.TourConstraint;
 import org.matsim.contribs.discrete_mode_choice.model.tour_based.TourEstimator;
 import org.matsim.contribs.discrete_mode_choice.model.trip_based.candidates.DefaultRoutedTripCandidate;
 import org.matsim.contribs.discrete_mode_choice.model.trip_based.candidates.TripCandidate;
+import org.matsim.contribs.discrete_mode_choice.model.utilities.MaximumSelector;
 import org.matsim.contribs.discrete_mode_choice.modules.ModelModule;
 import org.matsim.contribs.discrete_mode_choice.modules.config.DiscreteModeChoiceConfigGroup;
 import org.matsim.core.config.Config;
@@ -29,6 +38,7 @@ import org.matsim.core.config.ConfigUtils;
 import org.matsim.core.network.NetworkUtils;
 import org.matsim.core.population.PopulationUtils;
 import org.matsim.core.trafficmonitoring.FreeSpeedTravelTime;
+import org.matsim.core.utils.timing.TimeInterpretation;
 
 /** Budget, day profile, look-ahead constraint, scarcity penalty and DMC config switch (Phase 1b). */
 public class TestCreditBudget {
@@ -175,6 +185,59 @@ public class TestCreditBudget {
 	public void exemptAgentsAreNeverRestricted() {
 		var constraint = new CreditBudgetConstraint(null, calculator(), new CreditStats());
 		assertTrue(constraint.validateAfterEstimation(trips(2), tour(100.0, "car", "car"), List.of()));
+	}
+
+	@Test
+	public void forcedOverflowChoosesLeastOverrunWhenWalkingIsUnavailable() throws NoFeasibleChoiceException {
+		var stats = new CreditStats();
+		var choices = Map.of("car", tour(8.0, "car"), "car_loop", tour(7.0, "car_loop"));
+		assertEquals("car_loop", chooseTour(choices, choices.keySet().stream().toList(), stats).get(0).getMode());
+		assertEquals(1L, stats.getAndReset()[2]);
+	}
+
+	@Test
+	public void feasibleWalkPreventsCarOverflow() throws NoFeasibleChoiceException {
+		var stats = new CreditStats();
+		var choices = Map.of("car_loop", tour(8.0, "car_loop"), "walk_loop", tour(0.0, "walk_loop"));
+		assertEquals("walk_loop", chooseTour(choices, List.of("car_loop", "walk_loop"), stats).get(0).getMode());
+		assertEquals(0L, stats.getAndReset()[2]);
+	}
+
+	@Test
+	public void overflowCannotBypassOtherConstraints() {
+		var stats = new CreditStats();
+		var choices = Map.of("car_loop", tour(8.0, "car_loop"));
+		assertThrows(NoFeasibleChoiceException.class, () -> chooseTour(choices, List.of(), stats));
+		assertEquals(0L, stats.getAndReset()[2]);
+	}
+
+	private List<TripCandidate> chooseTour(Map<String, CreditTourCandidate> choices, List<String> feasibleModes,
+			CreditStats stats) throws NoFeasibleChoiceException {
+		var budgetConstraint = new CreditBudgetConstraint(twoTourDay(), calculator(), stats);
+		var hardConstraint = new TourConstraint() {
+			@Override
+			public boolean validateBeforeEstimation(List<DiscreteModeChoiceTrip> tour, List<String> modes,
+					List<List<String>> previousModes) {
+				return true;
+			}
+
+			@Override
+			public boolean validateAfterEstimation(List<DiscreteModeChoiceTrip> tour, TourCandidate candidate,
+					List<TourCandidate> previousCandidates) {
+				return feasibleModes.contains(candidate.getTripCandidates().get(0).getMode());
+			}
+		};
+		var constraints = new CompositeTourConstraintFactory(List.of(
+				(person, trips, modes) -> budgetConstraint, (person, trips, modes) -> hardConstraint));
+		var model = new TourBasedModel((person, modes, trips, previous) -> choices.get(modes.get(0)),
+				(person, trips) -> choices.keySet(), constraints, List::of, (person, trips) -> true,
+				(person, trips) -> new MaximumSelector(),
+				(modes, person, trips) -> new DefaultModeChainGenerator(modes, trips.size()),
+				FallbackBehaviour.EXCEPTION, TimeInterpretation.create(ConfigUtils.createConfig()));
+		var person = person("resident", new double[] { 0.0, 0.0 }, new double[] { 8 });
+		var trip = mock(DiscreteModeChoiceTrip.class);
+		when(trip.getOriginActivity()).thenReturn(PopulationUtils.getFirstActivity(person.getSelectedPlan()));
+		return model.chooseModes(person, List.of(trip), new Random(0));
 	}
 
 	// ----- scarcity penalty f -----

@@ -13,6 +13,7 @@ import org.matsim.api.core.v01.population.Person;
 import org.matsim.contribs.discrete_mode_choice.components.tour_finder.TourFinder;
 import org.matsim.contribs.discrete_mode_choice.model.DiscreteModeChoiceModel;
 import org.matsim.contribs.discrete_mode_choice.model.DiscreteModeChoiceTrip;
+import org.matsim.contribs.discrete_mode_choice.model.constraints.CompositeTourConstraint;
 import org.matsim.contribs.discrete_mode_choice.model.mode_availability.ModeAvailability;
 import org.matsim.contribs.discrete_mode_choice.model.mode_chain.ModeChainGenerator;
 import org.matsim.contribs.discrete_mode_choice.model.mode_chain.ModeChainGeneratorFactory;
@@ -63,6 +64,11 @@ public class TourBasedModel implements DiscreteModeChoiceModel {
 			throws NoFeasibleChoiceException {
 		List<String> modes = new ArrayList<>(modeAvailability.getAvailableModes(person, trips));
 		TourConstraint constraint = constraintFactory.createConstraint(person, trips, modes);
+		List<TourConstraint> constraints = constraint instanceof CompositeTourConstraint composite
+				? composite.getConstraints() : List.of(constraint);
+		FallbackTourConstraint fallbackConstraint = constraints.stream().filter(FallbackTourConstraint.class::isInstance)
+				.map(FallbackTourConstraint.class::cast).findFirst().orElse(null);
+		List<TourConstraint> hardConstraints = constraints.stream().filter(c -> c != fallbackConstraint).toList();
 
 		List<TourCandidate> tourCandidates = new LinkedList<>();
 		List<List<String>> tourCandidateModes = new LinkedList<>();
@@ -82,6 +88,9 @@ public class TourBasedModel implements DiscreteModeChoiceModel {
 				ModeChainGenerator generator = modeChainGeneratorFactory.createModeChainGenerator(modes, person,
 						tourTrips);
 				UtilitySelector selector = selectorFactory.createUtilitySelector(person, tourTrips);
+				TourCandidate overflowCandidate = null;
+				double overflowCost = Double.POSITIVE_INFINITY;
+				boolean hasAdmissibleCandidate = false;
 
 				while (generator.hasNext()) {
 					List<String> tourModes = generator.next();
@@ -97,14 +106,31 @@ public class TourBasedModel implements DiscreteModeChoiceModel {
 						continue;
 					}
 
-					if (!constraint.validateAfterEstimation(tourTrips, candidate, tourCandidates)) {
+					if (!hardConstraints.stream().allMatch(c -> c.validateAfterEstimation(tourTrips, candidate, tourCandidates))) {
 						continue;
 					}
 
+					if (fallbackConstraint != null
+							&& !fallbackConstraint.validateAfterEstimation(tourTrips, candidate, tourCandidates)) {
+						double cost = fallbackConstraint.fallbackCost(tourTrips, candidate, tourCandidates);
+						if (overflowCandidate == null || cost < overflowCost
+								|| (cost == overflowCost && candidate.getUtility() > overflowCandidate.getUtility())) {
+							overflowCandidate = candidate;
+							overflowCost = cost;
+						}
+						continue;
+					}
+
+					hasAdmissibleCandidate = true;
 					selector.addCandidate(candidate);
 				}
 
 				Optional<UtilityCandidate> selectedCandidate = selector.select(random);
+
+				if (selectedCandidate.isEmpty() && !hasAdmissibleCandidate && overflowCandidate != null) {
+					fallbackConstraint.reportFallback(person, tripIndex, overflowCandidate, overflowCost);
+					selectedCandidate = Optional.of(overflowCandidate);
+				}
 
 				if (!selectedCandidate.isPresent()) {
 					switch (fallbackBehaviour) {

@@ -3,8 +3,11 @@ package org.eqasim.switzerland.ch_cmdp.mobility_credits;
 import java.util.Collection;
 import java.util.List;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.population.Person;
 import org.matsim.contribs.discrete_mode_choice.model.DiscreteModeChoiceTrip;
+import org.matsim.contribs.discrete_mode_choice.model.tour_based.FallbackTourConstraint;
 import org.matsim.contribs.discrete_mode_choice.model.tour_based.TourCandidate;
 import org.matsim.contribs.discrete_mode_choice.model.tour_based.TourConstraint;
 import org.matsim.contribs.discrete_mode_choice.model.tour_based.TourConstraintFactory;
@@ -15,10 +18,11 @@ import com.google.inject.Inject;
  * Look-ahead budget constraint. A tour option of a resident is rejected if
  * credits of earlier tours + credits of this option + minimum need of all later trips > budget
  *
- * unless the option uses neither car nor car passenger: those are never rejected, so every tour keeps a feasible
- * option. Such overspending is counted in {@link CreditStats}.
+ * unless the option uses neither car nor car passenger. If all otherwise feasible options are rejected,
+ * the tour model can select the one with the smallest projected budget overrun.
  */
-public class CreditBudgetConstraint implements TourConstraint {
+public class CreditBudgetConstraint implements FallbackTourConstraint {
+	private static final Logger logger = LogManager.getLogger(CreditBudgetConstraint.class);
 	private static final double TOLERANCE = 1e-9;
 
 	private final DayProfiles.DayProfile day;
@@ -44,11 +48,7 @@ public class CreditBudgetConstraint implements TourConstraint {
 			return true; // exempt
 		}
 
-		double used = CreditTourCandidate.creditsOf(previousCandidates, calculator);
-		double credits = CreditTourCandidate.creditsOf(candidate, tour, calculator);
-		double futureNeed = day.getNeedFrom(CreditTourCandidate.tripsOf(previousCandidates) + tour.size());
-
-		if (used + credits + futureNeed <= day.getBudget() + TOLERANCE) {
+		if (fallbackCost(tour, candidate, previousCandidates) <= TOLERANCE) {
 			return true;
 		}
 
@@ -59,6 +59,23 @@ public class CreditBudgetConstraint implements TourConstraint {
 
 		stats.countRejected();
 		return false;
+	}
+
+	@Override
+	public double fallbackCost(List<DiscreteModeChoiceTrip> tour, TourCandidate candidate,
+			List<TourCandidate> previousCandidates) {
+		double used = CreditTourCandidate.creditsOf(previousCandidates, calculator);
+		double credits = CreditTourCandidate.creditsOf(candidate, tour, calculator);
+		double futureNeed = day.getNeedFrom(CreditTourCandidate.tripsOf(previousCandidates) + tour.size());
+		return used + credits + futureNeed - day.getBudget();
+	}
+
+	@Override
+	public void reportFallback(Person person, int tripIndex, TourCandidate candidate, double cost) {
+		stats.countForcedOverflow();
+		logger.warn("Forced credit budget overflow for resident {}, tour starting at trip {}, modes {}, "
+				+ "projected overrun {} credits (including estimated credits for later trips)",
+				person.getId(), tripIndex, candidate.getTripCandidates().stream().map(t -> t.getMode()).toList(), cost);
 	}
 
 	public static class Factory implements TourConstraintFactory {
