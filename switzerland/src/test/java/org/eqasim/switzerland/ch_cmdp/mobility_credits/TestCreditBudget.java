@@ -190,23 +190,23 @@ public class TestCreditBudget {
 	@Test
 	public void forcedOverflowChoosesLeastOverrunWhenWalkingIsUnavailable() throws NoFeasibleChoiceException {
 		var stats = new CreditStats();
-		var choices = Map.of("car", tour(8.0, "car"), "car_loop", tour(7.0, "car_loop"));
-		assertEquals("car_loop", chooseTour(choices, choices.keySet().stream().toList(), stats).get(0).getMode());
+		var choices = Map.of("car", tour(8.0, "car"), "car_passenger", tour(7.0, "car_passenger"));
+		assertEquals("car_passenger", chooseTour(choices, choices.keySet().stream().toList(), stats).get(0).getMode());
 		assertEquals(1L, stats.getAndReset()[2]);
 	}
 
 	@Test
 	public void feasibleWalkPreventsCarOverflow() throws NoFeasibleChoiceException {
 		var stats = new CreditStats();
-		var choices = Map.of("car_loop", tour(8.0, "car_loop"), "walk_loop", tour(0.0, "walk_loop"));
-		assertEquals("walk_loop", chooseTour(choices, List.of("car_loop", "walk_loop"), stats).get(0).getMode());
+		var choices = Map.of("car", tour(8.0, "car"), "walk", tour(0.0, "walk"));
+		assertEquals("walk", chooseTour(choices, List.of("car", "walk"), stats).get(0).getMode());
 		assertEquals(0L, stats.getAndReset()[2]);
 	}
 
 	@Test
 	public void overflowCannotBypassOtherConstraints() {
 		var stats = new CreditStats();
-		var choices = Map.of("car_loop", tour(8.0, "car_loop"));
+		var choices = Map.of("car", tour(8.0, "car"));
 		assertThrows(NoFeasibleChoiceException.class, () -> chooseTour(choices, List.of(), stats));
 		assertEquals(0L, stats.getAndReset()[2]);
 	}

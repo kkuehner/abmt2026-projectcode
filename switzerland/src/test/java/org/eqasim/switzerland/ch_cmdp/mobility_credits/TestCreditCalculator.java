@@ -1,7 +1,9 @@
 package org.eqasim.switzerland.ch_cmdp.mobility_credits;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 
 import java.util.List;
 import java.util.Map;
@@ -149,13 +151,19 @@ public class TestCreditCalculator {
 	}
 
 	@Test
-	public void teleportedCarLoopUsesRouteDistance() {
+	public void loopModesAreFree() {
 		var calculator = calculator(morningPeak());
 		Leg leg = PopulationUtils.createLeg("car_loop");
 		var route = RouteUtils.createGenericRouteImpl(START, START);
 		route.setDistance(3000.0);
 		leg.setRoute(route);
-		assertEquals(UNCONGESTED_CAR, calculator.calculateCredits("car_loop", 7.5 * H, List.of(leg)), DELTA);
+		assertEquals(0.0, calculator.calculateCredits("car_loop", 7.5 * H, List.of(leg)), DELTA);
+		assertEquals(0.0, calculator.calculateCredits("car_passenger_loop", 7.5 * H, List.of(leg)), DELTA);
+		assertEquals(0.0, calculator.calculateCredits("pt_loop", 8 * H, List.of(leg)), DELTA);
+		assertEquals(0.0, calculator.calculateCredits("bike_loop", 8 * H, List.of(leg)), DELTA);
+		assertFalse(CreditCalculator.isCarMode("car_loop"));
+		assertFalse(CreditCalculator.isCarMode("car_passenger_loop"));
+		assertTrue(CreditCalculator.isCarMode("car_passenger"));
 	}
 
 	@Test
@@ -174,7 +182,7 @@ public class TestCreditCalculator {
 		assertEquals(0.75, calculator.calculateCredits("pt", 8 * H, List.of(leg)), DELTA);
 		assertEquals(0.75, calculator.calculateCredits("pt", 17 * H, List.of(leg)), DELTA);
 		assertEquals(0.5, calculator.calculateCredits("pt", 9 * H, List.of(leg)), DELTA); // end is exclusive
-		assertEquals(0.75, calculator.calculateCredits("pt_loop", 24 * H + 8 * H, List.of(leg)), DELTA);
+		assertEquals(0.75, calculator.calculateCredits("pt", 24 * H + 8 * H, List.of(leg)), DELTA);
 	}
 
 	@Test
@@ -190,7 +198,6 @@ public class TestCreditCalculator {
 	public void bikeWalkAndOtherModes() {
 		var calculator = calculator(LinkCongestionTable.empty());
 		assertEquals(0.1, calculator.calculateCredits("bike", 8 * H, List.of()), DELTA);
-		assertEquals(0.1, calculator.calculateCredits("bike_loop", 8 * H, List.of()), DELTA);
 		assertEquals(0.0, calculator.calculateCredits("walk", 8 * H, List.of()), DELTA);
 		assertEquals(0.0, calculator.calculateCredits("truck", 8 * H, List.of()), DELTA);
 		assertEquals(0.0, calculator.calculateCredits("outside", 8 * H, List.of()), DELTA);

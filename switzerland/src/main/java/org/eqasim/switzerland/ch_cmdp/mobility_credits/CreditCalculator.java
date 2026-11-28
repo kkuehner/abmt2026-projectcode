@@ -33,8 +33,10 @@ import org.matsim.core.router.util.TravelTime;
  * <li>walk and all other modes (truck, outside, remote_walk, ...): 0</li>
  * </ul>
  *
- * "_loop" variants (e.g. car_loop) are priced like their base mode. Only legs
- * of the trip's own mode
+ * "_loop" modes (e.g. car_loop) are free: these survey trips start and end at
+ * the same place, are teleported with 0 km, use no road and their mode is fixed
+ * by the input, so a price could not change behaviour and would only use up
+ * budget. Only legs of the trip's own mode
  * count towards distance and congestion; access/egress walks are free.
  * <p>
  * Whether a person takes part in the scheme is not decided here; this class
@@ -72,7 +74,11 @@ public class CreditCalculator {
 	 * @param elements      the routed legs and interaction activities of the trip
 	 */
 	public double calculateCredits(String mode, double departureTime, List<? extends PlanElement> elements) {
-		switch (baseMode(mode)) {
+		if (isLoopMode(mode)) {
+			return 0.0;
+		}
+
+		switch (mode) {
 			case TransportMode.car:
 				return calculateCarCredits(mode, departureTime, elements);
 			case CAR_PASSENGER:
@@ -138,10 +144,16 @@ public class CreditCalculator {
 		return parameters.car.constant_credits + parameters.car.distanceFactor_credits * Math.log1p(distance_km);
 	}
 
-	/** True for car and car passenger (incl. "_loop" variants): the modes the budget may forbid. */
+	/**
+	 * True for car and car passenger: the modes the budget may forbid. Loop modes are free and fixed by the
+	 * input, so the budget never blocks them.
+	 */
 	public static boolean isCarMode(String mode) {
-		String base = baseMode(mode);
-		return base.equals(TransportMode.car) || base.equals(CAR_PASSENGER);
+		return mode.equals(TransportMode.car) || mode.equals(CAR_PASSENGER);
+	}
+
+	static boolean isLoopMode(String mode) {
+		return mode.endsWith(LOOP_SUFFIX);
 	}
 
 	private double calculateCarCredits(String mode, double departureTime, List<? extends PlanElement> elements) {

@@ -65,6 +65,7 @@ In 1a, **34.9 % of residents** used more than the proposed **11.59-credit** dail
 | D10 | Future need (look-ahead) | Per remaining trip: walk if ≤ 2 km, bike if ≤ 8 km, else PT; distance = straight line × 1.3 | No routing needed; PT credits don't depend on the route |
 | D11 | Scarcity penalty f | `f = w · (credit term per credit) · c_tour · s^k`, `s = (c_tour + future need) / balance` (0..1) | Plenty left → s ≈ 0 → ~no penalty; tight → full penalty |
 | D12 | Budget calibration check | Later: check B against the baseline's daily credits per resident ("B covers X %"), may replace D6 | Ties B to observed behaviour instead of a rule of thumb |
+| D13 | Loop trips (`*_loop`) | **0 credits**, never blocked by the budget | Survey trips with the same start and end: teleported with 0 km, no road use, mode fixed by the input. A price can't change behaviour and only uses up budget (caused the 1b crash of resident `1176674`) |
 
 ### Parameters
 
@@ -98,7 +99,7 @@ In 1a, **34.9 % of residents** used more than the proposed **11.59-credit** dail
 
 **Forced car tours can exceed the credit budget.** In 1b, resident `1176674` reached a zero-distance `car_loop` from the input with 0.7437 credits remaining. The loop cost 1 credit, and the mode rules offered no walking or other non-car option. The budget rejected the only option and replanning stopped.
 
-The tour model now checks vehicle continuity, trip rules, routing and utility as usual. A feasible walking tour remains available through the non-car safety net. If the budget rules out every otherwise feasible tour, the model selects the one with the smallest projected credit overrun. Each exception logs the resident, trip number, modes and projected overrun, and the iteration credit summary reports the count. The current look-ahead still estimates future needs from distance, so it can miss forced modes.
+The tour model now checks vehicle continuity, trip rules, routing and utility as usual. A feasible walking tour remains available through the non-car safety net. If the budget rules out every otherwise feasible tour, the model selects the one with the smallest projected credit overrun. Each exception logs the resident, trip number, modes and projected overrun, and the iteration credit summary reports the count. Root cause fixed by D13: loop trips are now free and never blocked, so this case can no longer occur. The fallback stays as a guard; any forced overflow logged from now on is a real budget problem and worth checking.
 
 ## Model
 
